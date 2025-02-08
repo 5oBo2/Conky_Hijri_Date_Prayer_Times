@@ -117,7 +117,7 @@ function conky_main()
     if conky_window == nil then
         return
     end
-
+    local current_time = TimeToMinutes(GetCurrentTime())
     local cs = cairo_xlib_surface_create(
         conky_window.display,
         conky_window.drawable,
@@ -140,17 +140,19 @@ function conky_main()
     cairo_select_font_face(cr, font, CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL)
     
 
-    local prayer, hours_till, minutes_till, remainingMinutes = GetCurrentPrayerAndTimeRemaining(Prayer_times_table, TimeToMinutes(GetCurrentTime()))
+    local prayer, hours_till, minutes_till, remainingMinutes = GetCurrentPrayerAndTimeRemaining(Prayer_times_table, current_time)
 
-    local prev_prayer, hours_since, minutes_since, elapsedMinutes = GetPreviousPrayerAndTimeElapsed(Prayer_times_table, TimeToMinutes(GetCurrentTime()))
+    local prev_prayer, hours_since, minutes_since, elapsedMinutes = GetPreviousPrayerAndTimeElapsed(Prayer_times_table, current_time)
 
-    -- Day = tonumber(Day) -- Convert day to number for comparison
-    -- StringDay = string.format("%02d", Day)
-    -- -- Choose colors for the day
-    -- local day_red, day_green, day_blue, day_alpha = 1, 1, 1, alpha -- Default color: white
-    -- if Day > 11 and Day < 16 then
-    --     day_red, day_green, day_blue, day_alpha = 200/255, 55/255, 55/255, alpha -- Highlight color: red
-    -- end
+    local min_r, min_g, min_b, min_alpha = 1, 1, 1, alpha -- Default color: white
+    local e_min_r, e_min_g, e_min_b, e_min_alpha = 1, 1, 1, alpha -- Default color: white
+
+    if remainingMinutes < 16 then
+        min_r, min_g, min_b, min_alpha = 200/255, 55/255, 55/255, alpha -- Highlight color: red
+    end
+    if elapsedMinutes > 5 and elapsedMinutes < 20 then
+        e_min_r, e_min_g, e_min_b, e_min_alpha = 200/255, 55/255, 55/255, alpha -- Highlight color: red
+    end
     
     local extents = cairo_text_extents_t:create()
 
@@ -160,20 +162,57 @@ function conky_main()
     local total_width = (fajr_width * 7) + (xmargin*6)
 
     local xpos = (conky_window.width - total_width) / 2 
-    local name_margin_x = 25
-    local name_margin_y = 250
+    local name_margin_x = ymargin
+    local name_margin_y = font_size
 
 
     draw_colored_text(cr, 'Since ' .. prev_prayer, font_small, xpos - name_margin_x, 0 + font_small, 1, 1, 1, alpha)
-    draw_colored_text(cr, hours_since .. " " .. minutes_since, font_size, xpos, 0 + font_size + font_small, 1, 1, 1, alpha) 
+    draw_colored_text(cr, hours_since, font_size, xpos, 0 + font_size + font_small, 1, 1, 1, alpha) 
+    draw_colored_text(cr, minutes_since, font_size, xpos + font_size + xmargin/2 , 0 + font_size + font_small, e_min_r, e_min_g, e_min_b, e_min_alpha) 
+
     draw_colored_text(cr, 'Fajr', font_small, xpos - name_margin_x, ypos - name_margin_y, 1, 1, 1, alpha)
     draw_colored_text(cr, Fajr, font_size, xpos, ypos, 1, 1, 1, alpha)
+
     draw_colored_text(cr, 'Till ' .. prayer, font_small, xpos - name_margin_x, ypos + font_small + ymargin, 1, 1, 1, alpha)
-    draw_colored_text(cr, hours_till .. " " .. minutes_till, font_size, xpos, ypos + font_size + font_small + ymargin, 1, 1, 1, alpha) 
+    draw_colored_text(cr, hours_till, font_size, xpos, ypos + font_size + font_small + ymargin, 1, 1, 1, alpha) 
+    draw_colored_text(cr, minutes_till, font_size, xpos + font_size + xmargin/2 , ypos + font_size + font_small + ymargin, min_r, min_g, min_b, min_alpha) 
 
     xpos = xpos + fajr_width + xmargin
     draw_colored_text(cr, 'Sunrise', font_small, xpos - name_margin_x, ypos - name_margin_y, 1, 1, 1, alpha)
-    draw_colored_text(cr, Sunrise, font_size, xpos, ypos, 1, 1, 1, alpha)       
+    draw_colored_text(cr, Sunrise, font_size, xpos, ypos, 1, 1, 1, alpha)
+    if Prayer_times_table['Isha'] < current_time and Prayer_times_table['Midnight'] > current_time then
+		local remainingMinutes_Midnight = Prayer_times_table['Midnight'] - current_time
+		local hours_Midnight = string.format("%02d", math.floor(remainingMinutes_Midnight / 60))
+		local minutes_Midnight = string.format("%02d", remainingMinutes_Midnight % 60)
+
+        local min_r, min_g, min_b, min_alpha = 1, 1, 1, alpha -- Default color: white
+        if remainingMinutes_Midnight <= 15 then
+            min_r, min_g, min_b, min_alpha = 200/255, 55/255, 55/255, alpha		
+		end
+
+        draw_colored_text(cr, 'Till Midnight', font_small, xpos - name_margin_x, ypos + font_small + ymargin, 1, 1, 1, alpha)
+        draw_colored_text(cr, hours_Midnight, font_size, xpos, ypos + font_size + font_small + ymargin, 1, 1, 1, alpha)
+        draw_colored_text(cr, minutes_Midnight, font_size, xpos + font_size + xmargin/2, ypos + font_size + font_small + ymargin, min_r, min_g, min_b, min_alpha)
+		
+		
+	
+	elseif Prayer_times_table['Fajr'] < current_time and Prayer_times_table['Sunrise'] > current_time then
+
+		local remainingMinutes_Sunrise = Prayer_times_table['Sunrise'] - current_time
+        local hours_Sunrise = string.format("%02d", math.floor(remainingMinutes_Sunrise / 60))
+		local minutes_Sunrise = string.format("%02d", remainingMinutes_Sunrise % 60)
+        local min_r, min_g, min_b, min_alpha = 1, 1, 1, alpha -- Default color: white
+        if remainingMinutes_Sunrise <= 15 then
+            min_r, min_g, min_b, min_alpha = 200/255, 55/255, 55/255, alpha		
+		end
+
+
+        draw_colored_text(cr, 'Till Sunrise', font_small, xpos - name_margin_x, ypos + font_small + ymargin, 1, 1, 1, alpha)
+        draw_colored_text(cr, hours_Sunrise, font_size, xpos, ypos + font_size + font_small + ymargin, 1, 1, 1, alpha)
+        draw_colored_text(cr, minutes_Sunrise, font_size, xpos + font_size + xmargin/2, ypos + font_size + font_small + ymargin, min_r, min_g, min_b, min_alpha)
+
+
+	end    
     
     xpos = xpos + fajr_width + xmargin
     draw_colored_text(cr, 'Dhuhr', font_small, xpos - name_margin_x, ypos - name_margin_y, 1, 1, 1, alpha)
