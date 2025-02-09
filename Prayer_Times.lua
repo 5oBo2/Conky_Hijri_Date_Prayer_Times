@@ -165,10 +165,12 @@ function conky_main()
     local name_margin_x = ymargin
     local name_margin_y = font_size
 
-
-    draw_colored_text(cr, 'Since ' .. prev_prayer, font_small, xpos - name_margin_x, 0 + font_small, 1, 1, 1, alpha)
-    draw_colored_text(cr, hours_since, font_size, xpos, 0 + font_size + font_small, 1, 1, 1, alpha) 
-    draw_colored_text(cr, minutes_since, font_size, xpos + font_size + xmargin/2 , 0 + font_size + font_small, e_min_r, e_min_g, e_min_b, e_min_alpha) 
+    if  elapsedMinutes < 61 then
+        draw_colored_text(cr, 'Since ' .. prev_prayer, font_small, xpos - name_margin_x, 0 + font_small, 1, 1, 1, alpha)
+        draw_colored_text(cr, hours_since, font_size, xpos, 0 + font_size + font_small, 1, 1, 1, alpha) 
+        draw_colored_text(cr, minutes_since, font_size, xpos + font_size + xmargin/2 , 0 + font_size + font_small, e_min_r, e_min_g, e_min_b, e_min_alpha) 
+    end
+    
 
     draw_colored_text(cr, 'Fajr', font_small, xpos - name_margin_x, ypos - name_margin_y, 1, 1, 1, alpha)
     draw_colored_text(cr, Fajr, font_size, xpos, ypos, 1, 1, 1, alpha)

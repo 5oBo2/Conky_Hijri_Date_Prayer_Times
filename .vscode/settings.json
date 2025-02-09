@@ -1,0 +1,5 @@
+{
+    "Lua.diagnostics.globals": [
+        "cairo_set_source_rgba"
+    ]
+}
