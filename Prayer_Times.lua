@@ -6,6 +6,7 @@ local ltn12 = require("ltn12") -- Required for response sink
 local json = require("dkjson") -- JSON parsing library
 
 Prayers= {"Fajr", "Dhuhr", "Asr", "Maghrib", "Isha"}
+PlayedAthan=false
 
 function TimeToMinutes(timeStr)
 	local hours, minutes = timeStr:match("(%d+):(%d+)")
@@ -237,6 +238,12 @@ function conky_main()
     draw_colored_text(cr, Midnight, font_size, xpos, ypos, 1, 1, 1, alpha)        
          
 
+    if remainingMinutes == 0 and not PlayedAthan then
+        PlayedAthan=true
+        os.execute("paplay ~/.config/conky/athan.wav &")
+    elseif remainingMinutes ~= 0 and PlayedAthan then
+        PlayedAthan=false
+    end
 
     -- Clean up
     cairo_destroy(cr)

@@ -97,10 +97,10 @@ function conky_main()
     local time = os.date("%H%M")
     local current_time = TimeToMinutes(GetCurrentTime())
 
-    if not AfterMaghribCall and  current_time > Maghrib then
+    if not AfterMaghribCall and  Maghrib < current_time then
         AfterMaghribCall=true
         fetch_hijri_date(AfterMaghribCall)
-    elseif Maghrib > current_time then
+    elseif AfterMaghribCall and Maghrib > current_time then
         AfterMaghribCall=false
     end
 
