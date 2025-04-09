@@ -7,6 +7,15 @@ local json = require("dkjson") -- JSON parsing library
 
 Prayers= {"Fajr", "Dhuhr", "Asr", "Maghrib", "Isha"}
 PlayedAthan=false
+DaysAdjustment = -1
+
+function NormalizeToDay(timestamp)
+    local t = os.date("*t", timestamp)
+    t.hour = 0
+    t.min = 0
+    t.sec = 0
+    return os.time(t)
+end
 
 function TimeToMinutes(timeStr)
 	local hours, minutes = timeStr:match("(%d+):(%d+)")
@@ -20,10 +29,12 @@ function GetCurrentTime()
 end
 
 -- Function to fetch Prayer times
-function fetch_prayer_times()
+function FetchPrayerTimes()
+    local now = os.time()
+    DateStamp = NormalizeToDay(now)
     local latitude = 30.0444
     local longitude = 31.23575
-    local today_date = os.date("%d-%m-%Y")
+    local today_date = os.date("%d-%m-%Y", now + (86400 * DaysAdjustment))
     local url = "https://api.aladhan.com/v1/timings/" .. today_date .. "?latitude=" .. latitude .. "&longitude=" .. longitude .. "&midnightMode=1"
     local response_body = {}
     print('Fetching Prayer Times...')
@@ -46,6 +57,8 @@ function fetch_prayer_times()
             Prayer_times_table={Fajr=TimeToMinutes(Fajr), Sunrise=TimeToMinutes(Sunrise), Dhuhr=TimeToMinutes(Dhuhr), Asr=TimeToMinutes(Asr), Maghrib=TimeToMinutes(Maghrib), Isha=TimeToMinutes(Isha), Midnight=TimeToMinutes(Midnight)}
 
             print('Done Extracting Prayer Times')
+            print('Days adjustment', DaysAdjustment)
+            print('Date', today_date)
         else
             print("Error fetching date")
         end
@@ -101,7 +114,7 @@ end
 
 
 -- Fetch Prayer times once
-fetch_prayer_times()
+FetchPrayerTimes()
 
 -- Function to draw text with color
 function draw_colored_text(cr, text, font_size, xpos, ypos, red, green, blue, alpha)
@@ -119,6 +132,13 @@ function conky_main()
         return
     end
     local current_time = TimeToMinutes(GetCurrentTime())
+    local now = os.time()
+    local dateStamp = NormalizeToDay(now)
+
+    if dateStamp > DateStamp then
+        FetchPrayerTimes()
+    end
+
     local cs = cairo_xlib_surface_create(
         conky_window.display,
         conky_window.drawable,

@@ -1,5 +1,19 @@
 {
     "Lua.diagnostics.globals": [
-        "cairo_set_source_rgba"
+        "cairo_set_source_rgba",
+        "cairo_destroy",
+        "cairo_surface_destroy",
+        "cairo_xlib_surface_create",
+        "cairo_create",
+        "cairo_set_font_size",
+        "cairo_select_font_face",
+        "CAIRO_FONT_SLANT_NORMAL",
+        "CAIRO_FONT_WEIGHT_NORMAL",
+        "conky_window",
+        "cairo_text_extents_t",
+        "cairo_text_extents",
+        "cairo_stroke",
+        "cairo_show_text",
+        "cairo_move_to"
     ]
 }

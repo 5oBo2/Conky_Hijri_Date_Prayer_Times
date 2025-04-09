@@ -5,6 +5,19 @@ local http = require("socket.http") -- Ensure LuaSocket is installed
 local ltn12 = require("ltn12") -- Required for response sink
 local json = require("dkjson") -- JSON parsing library
 
+MonthName = {[1]="Muharram",[2]="Safar",[3]="Rabi Al Awwal",[4]="Rabi Al Thani",[5]="Jumada Al Oula",[6]="Jumada Al-Akhira",[7]="Rajab",[8]="Shaban",[9]="Ramadan", [10]="Shawwal", [11]="Dhul Qidah", [12]="Dhul Hijjah"}
+
+AfterMaghribCall = false
+DaysAdjustment = -1
+
+function NormalizeToDay(timestamp)
+    local t = os.date("*t", timestamp)
+    t.hour = 0
+    t.min = 0
+    t.sec = 0
+    return os.time(t)
+end
+
 function TimeToMinutes(timeStr)
 	local hours, minutes = timeStr:match("(%d+):(%d+)")
 	return tonumber(hours) * 60 + tonumber(minutes)
@@ -16,17 +29,18 @@ function GetCurrentTime()
     return current_time
 end
 
-
-AfterMaghribCall = false
 -- Function to fetch Hijri date
-function fetch_hijri_date(AfterMaghribCall)
+function FetchHijriDate()
+    local now = os.time()
+    DateStamp = NormalizeToDay(now)
+    local date = os.date("%d-%m-%Y", now + (AfterMaghribCall and 86400 or 0) + (86400 * DaysAdjustment))
 
-    local month_name = {[1]="Muharram",[2]="Safar",[3]="Rabi Al Awwal",[4]="Rabi Al Thani",[5]="Jumada Al Oula",[6]="Jumada Al-Akhira",[7]="Rajab",[8]="Shaban",[9]="Ramadan", [10]="Shawwal", [11]="Dhul Qidah", [12]="Dhul Hijjah"}
+    print('Days adjustment', DaysAdjustment)
+    print('Date', date)
+    
 
     local latitude = 30.0444
     local longitude = 31.23575
-    local date = os.date("%d-%m-%Y", os.time() + (AfterMaghribCall and 86400 or 0))
-    print('date', date)
     local url = "https://api.aladhan.com/v1/timings/" .. date .. "?latitude=" .. latitude .. "&longitude=" .. longitude
     local response_body = {}
     local res, code = http.request{
@@ -40,7 +54,7 @@ function fetch_hijri_date(AfterMaghribCall)
         if not err then
             Day = data.data.date.hijri.day
             local month = data.data.date.hijri.month.number
-            Month = month_name[month]
+            Month = MonthName[month]
             Year = data.data.date.hijri.year
             Maghrib = TimeToMinutes(data.data.timings.Maghrib)
         else
@@ -52,7 +66,7 @@ function fetch_hijri_date(AfterMaghribCall)
 end
 
 -- Fetch the Hijri date 
-fetch_hijri_date(AfterMaghribCall)
+FetchHijriDate()
 
 -- Function to draw text with color
 function draw_colored_text(cr, text, xpos, ypos, red, green, blue, alpha)
@@ -93,13 +107,20 @@ function conky_main()
     cairo_set_font_size(cr, font_size_time)
     local extents = cairo_text_extents_t:create()
 
-    local date = os.date("%A |  %d %B %Y")
-    local time = os.date("%H%M")
+    local now = os.time()
+    local date = os.date("%A |  %d %B %Y", now)
+    local dateStamp = NormalizeToDay(now)
+    local time = os.date("%H%M", now)
     local current_time = TimeToMinutes(GetCurrentTime())
+
+    if dateStamp > DateStamp then
+        FetchHijriDate()
+    end
 
     if not AfterMaghribCall and  Maghrib < current_time then
         AfterMaghribCall=true
-        fetch_hijri_date(AfterMaghribCall)
+        print('After Maghrib adjustment')
+        FetchHijriDate()
     elseif AfterMaghribCall and Maghrib > current_time then
         AfterMaghribCall=false
     end
