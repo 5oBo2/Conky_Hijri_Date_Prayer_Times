@@ -8,6 +8,11 @@ local json = require("dkjson") -- JSON parsing library
 Prayers= {"Fajr", "Dhuhr", "Asr", "Maghrib", "Isha"}
 PlayedAthan=false
 DaysAdjustment = -1
+MidnightAfterMidnight=false
+
+-- Retry configuration
+MaxRetries = 10
+RetryDelay = 2  -- seconds
 
 function NormalizeToDay(timestamp)
     local t = os.date("*t", timestamp)
@@ -36,35 +41,80 @@ function FetchPrayerTimes()
     local longitude = 31.23575
     local today_date = os.date("%d-%m-%Y", now + (86400 * DaysAdjustment))
     local url = "https://api.aladhan.com/v1/timings/" .. today_date .. "?latitude=" .. latitude .. "&longitude=" .. longitude .. "&midnightMode=1"
-    local response_body = {}
+    
+    local attempt = 0
+    local success = false
+    local currentRetryDelay = RetryDelay  -- Local copy for this function call
+    
     print('Fetching Prayer Times...')
-    local res, code = http.request{
-        url = url,
-        sink = ltn12.sink.table(response_body)
-    }
-    if code == 200 then
-        local response = table.concat(response_body)
-        local data, _, err = json.decode(response, 1, nil)
-        if not err then
-            Fajr = data.data.timings.Fajr
-            Sunrise = data.data.timings.Sunrise
-            Dhuhr = data.data.timings.Dhuhr
-            Asr = data.data.timings.Asr
-            Maghrib = data.data.timings.Maghrib
-            Isha = data.data.timings.Isha
-            Midnight = data.data.timings.Midnight
-
-            Prayer_times_table={Fajr=TimeToMinutes(Fajr), Sunrise=TimeToMinutes(Sunrise), Dhuhr=TimeToMinutes(Dhuhr), Asr=TimeToMinutes(Asr), Maghrib=TimeToMinutes(Maghrib), Isha=TimeToMinutes(Isha), Midnight=TimeToMinutes(Midnight)}
-
-            print('Done Extracting Prayer Times')
-            print('Days adjustment', DaysAdjustment)
-            print('Date', today_date)
+    
+    while attempt < MaxRetries and not success do
+        attempt = attempt + 1
+        print("Attempt " .. attempt .. " of " .. MaxRetries)
+        
+        local response_body = {}
+        local res, code = http.request{
+            url = url,
+            sink = ltn12.sink.table(response_body)
+        }
+        
+        if code == 200 then
+            local response = table.concat(response_body)
+            local data, _, err = json.decode(response, 1, nil)
+            
+            if not err then
+                Fajr = data.data.timings.Fajr
+                Sunrise = data.data.timings.Sunrise
+                Dhuhr = data.data.timings.Dhuhr
+                Asr = data.data.timings.Asr
+                Maghrib = data.data.timings.Maghrib
+                Isha = data.data.timings.Isha
+                Midnight = data.data.timings.Midnight
+                
+                Prayer_times_table = {
+                    Fajr = TimeToMinutes(Fajr), 
+                    Sunrise = TimeToMinutes(Sunrise), 
+                    Dhuhr = TimeToMinutes(Dhuhr), 
+                    Asr = TimeToMinutes(Asr), 
+                    Maghrib = TimeToMinutes(Maghrib), 
+                    Isha = TimeToMinutes(Isha), 
+                    Midnight = TimeToMinutes(Midnight)
+                }
+                if Prayer_times_table['Midnight'] < Prayer_times_table['Maghrib'] then
+                    MidnightAfterMidnight = true
+                    Prayer_times_table['Midnight'] = Prayer_times_table['Midnight'] + (24*60)
+                elseif MidnightAfterMidnight then
+                    MidnightAfterMidnight = false
+                end
+                success = true
+                print('Done Extracting Prayer Times')
+                print('Days adjustment', DaysAdjustment)
+                print('Date', today_date)
+            else
+                print("Error decoding JSON on attempt " .. attempt .. ": " .. tostring(err))
+                if attempt < MaxRetries then
+                    print("Retrying in " .. currentRetryDelay .. " seconds...")
+                    os.execute("sleep " .. currentRetryDelay)
+                    -- Increase delay for next retry (exponential backoff)
+                    currentRetryDelay = currentRetryDelay * 2
+                end
+            end
         else
-            print("Error fetching date")
+            print("HTTP Error on attempt " .. attempt .. ": " .. tostring(code))
+            if attempt < MaxRetries then
+                print("Retrying in " .. currentRetryDelay .. " seconds...")
+                os.execute("sleep " .. currentRetryDelay)
+                -- Increase delay for next retry (exponential backoff)
+                currentRetryDelay = currentRetryDelay * 2
+            end
         end
-    else
-        print("HTTP Error: " .. tostring(code))
     end
+    
+    if not success then
+        print("Failed to fetch Prayer times after " .. MaxRetries .. " attempts")
+    end
+    
+    return success
 end
 
 function GetCurrentPrayerAndTimeRemaining(prayer_times_table, current_time)
@@ -203,7 +253,23 @@ function conky_main()
     xpos = xpos + fajr_width + xmargin
     draw_colored_text(cr, 'Sunrise', font_small, xpos - name_margin_x, ypos - name_margin_y, 1, 1, 1, alpha)
     draw_colored_text(cr, Sunrise, font_size, xpos, ypos, 1, 1, 1, alpha)
-    if Prayer_times_table['Isha'] < current_time and Prayer_times_table['Midnight'] > current_time then
+
+    if MidnightAfterMidnight and Prayer_times_table['Fajr'] > current_time and Prayer_times_table['Midnight'] - (24*60) > current_time then
+
+        local remainingMinutes_Midnight = Prayer_times_table['Midnight'] - (24*60) - current_time
+		local hours_Midnight = string.format("%02d", math.floor(remainingMinutes_Midnight / 60))
+		local minutes_Midnight = string.format("%02d", remainingMinutes_Midnight % 60)
+
+        local min_r, min_g, min_b, min_alpha = 1, 1, 1, alpha -- Default color: white
+        if remainingMinutes_Midnight <= 15 then
+            min_r, min_g, min_b, min_alpha = 200/255, 55/255, 55/255, alpha		
+		end
+
+        draw_colored_text(cr, 'Till Midnight', font_small, xpos - name_margin_x, ypos + font_small + ymargin, 1, 1, 1, alpha)
+        draw_colored_text(cr, hours_Midnight, font_size, xpos, ypos + font_size + font_small + ymargin, 1, 1, 1, alpha)
+        draw_colored_text(cr, minutes_Midnight, font_size, xpos + font_size + xmargin/2, ypos + font_size + font_small + ymargin, min_r, min_g, min_b, min_alpha)
+        
+    elseif Prayer_times_table['Isha'] < current_time and Prayer_times_table['Midnight'] > current_time then
 		local remainingMinutes_Midnight = Prayer_times_table['Midnight'] - current_time
 		local hours_Midnight = string.format("%02d", math.floor(remainingMinutes_Midnight / 60))
 		local minutes_Midnight = string.format("%02d", remainingMinutes_Midnight % 60)

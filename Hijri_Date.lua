@@ -5,10 +5,16 @@ local http = require("socket.http") -- Ensure LuaSocket is installed
 local ltn12 = require("ltn12") -- Required for response sink
 local json = require("dkjson") -- JSON parsing library
 
+Default_rgba = {1, 1, 1, 200/255}
+Red_rgba = {200/255, 55/255, 55/255, 200/255}
 MonthName = {[1]="Muharram",[2]="Safar",[3]="Rabi Al Awwal",[4]="Rabi Al Thani",[5]="Jumada Al Oula",[6]="Jumada Al-Akhira",[7]="Rajab",[8]="Shaban",[9]="Ramadan", [10]="Shawwal", [11]="Dhul Qidah", [12]="Dhul Hijjah"}
 
 AfterMaghribCall = false
-DaysAdjustment = -1
+DaysAdjustment = 0
+
+-- Retry configuration
+MaxRetries = 10
+RetryDelay = 2  -- seconds
 
 function NormalizeToDay(timestamp)
     local t = os.date("*t", timestamp)
@@ -34,43 +40,72 @@ function FetchHijriDate()
     local now = os.time()
     DateStamp = NormalizeToDay(now)
     local date = os.date("%d-%m-%Y", now + (AfterMaghribCall and 86400 or 0) + (86400 * DaysAdjustment))
-
     print('Days adjustment', DaysAdjustment)
     print('Date', date)
     
-
     local latitude = 30.0444
     local longitude = 31.23575
     local url = "https://api.aladhan.com/v1/timings/" .. date .. "?latitude=" .. latitude .. "&longitude=" .. longitude
-    local response_body = {}
-    local res, code = http.request{
-        url = url,
-        sink = ltn12.sink.table(response_body)
-    }
-
-    if code == 200 then
-        local response = table.concat(response_body)
-        local data, _, err = json.decode(response, 1, nil)
-        if not err then
-            Day = data.data.date.hijri.day
-            local month = data.data.date.hijri.month.number
-            Month = MonthName[month]
-            Year = data.data.date.hijri.year
-            Maghrib = TimeToMinutes(data.data.timings.Maghrib)
+    
+    local attempt = 0
+    local success = false
+    local currentRetryDelay = RetryDelay  -- Local copy for this function call
+    
+    while attempt < MaxRetries and not success do
+        attempt = attempt + 1
+        print("Attempt " .. attempt .. " of " .. MaxRetries)
+        
+        local response_body = {}
+        local res, code = http.request{
+            url = url,
+            sink = ltn12.sink.table(response_body)
+        }
+        
+        if code == 200 then
+            local response = table.concat(response_body)
+            local data, _, err = json.decode(response, 1, nil)
+            
+            if not err then
+                Day = data.data.date.hijri.day
+                local month = data.data.date.hijri.month.number
+                Month = MonthName[month]
+                Year = data.data.date.hijri.year
+                Maghrib = TimeToMinutes(data.data.timings.Maghrib)
+                success = true
+                print("Successfully fetched Hijri date on attempt " .. attempt)
+            else
+                print("Error decoding JSON on attempt " .. attempt .. ": " .. tostring(err))
+                if attempt < MaxRetries then
+                    print("Retrying in " .. currentRetryDelay .. " seconds...")
+                    os.execute("sleep " .. currentRetryDelay)
+                    -- Increase delay for next retry (exponential backoff)
+                    currentRetryDelay = currentRetryDelay * 2
+                end
+            end
         else
-            print("Error fetching date")
+            print("HTTP Error on attempt " .. attempt .. ": " .. tostring(code))
+            if attempt < MaxRetries then
+                print("Retrying in " .. currentRetryDelay .. " seconds...")
+                os.execute("sleep " .. currentRetryDelay)
+                -- Increase delay for next retry (exponential backoff)
+                currentRetryDelay = currentRetryDelay * 2
+            end
         end
-    else
-        print("HTTP Error: " .. tostring(code))
     end
+    
+    if not success then
+        print("Failed to fetch Hijri date after " .. MaxRetries .. " attempts")
+    end
+    
+    return success
 end
 
 -- Fetch the Hijri date 
 FetchHijriDate()
 
 -- Function to draw text with color
-function draw_colored_text(cr, text, xpos, ypos, red, green, blue, alpha)
-
+function draw_colored_text(cr, text, xpos, ypos, Default_rgba)
+    local red, green, blue, alpha = table.unpack(Default_rgba)
     cairo_set_source_rgba(cr, red, green, blue, alpha)
     cairo_move_to(cr, xpos, ypos)
     cairo_show_text(cr, text)
@@ -100,7 +135,6 @@ function conky_main()
     local ypos_date = font_size_time + font_size_date + y_margin
     local ypos_hijri = ypos_date + font_size_date + y_margin / 2
     -- print('min window height: ' .. ypos_hijri)
-    local alpha = 200/255
 
     cr = cairo_create(cs)
     cairo_select_font_face(cr, font, CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL)
@@ -123,27 +157,28 @@ function conky_main()
         FetchHijriDate()
     elseif AfterMaghribCall and Maghrib > current_time then
         AfterMaghribCall=false
+        FetchHijriDate()
     end
 
     cairo_text_extents(cr, time, extents)
     local time_width = extents.width
     local xpos_time = (conky_window.width - time_width) / 2 
-    draw_colored_text(cr, time, xpos_time, font_size_time, 1, 1, 1, alpha)  
+    draw_colored_text(cr, time, xpos_time, font_size_time, Default_rgba)  
 
     cairo_set_font_size(cr, font_size_date)
     cairo_text_extents(cr, date, extents)
     local date_width = extents.width
     local xpos_date = (conky_window.width - date_width) / 2 
-    draw_colored_text(cr, date, xpos_date, ypos_date, 1, 1, 1, alpha)  
+    draw_colored_text(cr, date, xpos_date, ypos_date, Default_rgba)  
 
     -- Ensure valid split
     if Day and Month and Year then
         Day = tonumber(Day) -- Convert day to number for comparison
         StringDay = string.format("%02d", Day)
         -- Choose colors for the day
-        local day_red, day_green, day_blue, day_alpha = 1, 1, 1, alpha -- Default color: white
+        local day_red, day_green, day_blue, day_alpha = table.unpack(Default_rgba) -- Default color: white
         if Day > 11 and Day < 16 then
-            day_red, day_green, day_blue, day_alpha = 200/255, 55/255, 55/255, alpha -- Highlight color: red
+            day_red, day_green, day_blue, day_alpha = table.unpack(Red_rgba) -- Highlight color: red
         end        
 
         cairo_text_extents(cr, StringDay, extents)
@@ -157,15 +192,15 @@ function conky_main()
         local xpos = (conky_window.width - total_width) / 2 
 
         -- Draw the day with conditional color
-        draw_colored_text(cr, StringDay, xpos, ypos_hijri, day_red, day_green, day_blue, day_alpha)
+        draw_colored_text(cr, StringDay, xpos, ypos_hijri, {day_red, day_green, day_blue, day_alpha})
 
         -- Draw the month in default color
         xpos = xpos + day_width + x_margin
-        draw_colored_text(cr, Month, xpos, ypos_hijri, 1, 1, 1, alpha)        
+        draw_colored_text(cr, Month, xpos, ypos_hijri, Default_rgba)        
         
         -- Draw the year in default color
         xpos = xpos + month_width + x_margin
-        draw_colored_text(cr, tostring(Year), xpos, ypos_hijri, 1, 1, 1, alpha)        
+        draw_colored_text(cr, tostring(Year), xpos, ypos_hijri, Default_rgba)        
   
 
     end
