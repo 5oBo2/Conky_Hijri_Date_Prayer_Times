@@ -1,338 +1,201 @@
--- Lua Script
-require("cairo")
-require("cairo_xlib")
-local http = require("socket.http") -- Ensure LuaSocket is installed
-local ltn12 = require("ltn12") -- Required for response sink
-local json = require("dkjson") -- JSON parsing library
+-- Cairo prayer times, absolute-timestamp countdowns and optional mouse hover.
+-- Local system timezone must match the chosen Aladhan location.
+require('cairo')
+local base = debug.getinfo(1, 'S').source:match('^@(.*/)') or './'
+local Surface = dofile(base .. 'Surface.lua')
+local data_source = dofile(base .. 'Prayer_Data.lua')
+local settings = dofile(base .. 'Settings.lua')
+local Hover = dofile(base .. 'Hover_State.lua')
+local SCALE = settings.scale('prayer')
+local ENABLE_ATHAN = settings.boolean('behavior', 'athan_enabled', true)
 
-Prayers= {"Fajr", "Dhuhr", "Asr", "Maghrib", "Isha"}
-PlayedAthan=false
-DaysAdjustment = -1
-MidnightAfterMidnight=false
+local PRAYERS = {'Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'}
+local LABELS = {'Fajr', 'Sunrise', 'Dhuhr', 'Asr', 'Maghrib', 'Isha', 'Midnight'}
+local RED = {200 / 255, 55 / 255, 55 / 255, 200 / 255}
+local WHITE = {1, 1, 1, 200 / 255}
+local FONT = settings.get('appearance', 'font', 'DejaVu Sans')
+local FONT_LARGE, FONT_SMALL = 50 * SCALE, 20 * SCALE
+local ELAPSED_VISIBLE_SECONDS = math.max(0, settings.number('behavior', 'elapsed_minutes', 60)) * 60
+local hover = Hover.new(settings.number('behavior', 'hover_failsafe_seconds', 5),
+                        settings.get('behavior', 'hover_area', 'content'))
+local last_draw_time = nil
+local last_athan_event = nil
 
--- Retry configuration
-MaxRetries = 10
-RetryDelay = 2  -- seconds
-
-function NormalizeToDay(timestamp)
-    local t = os.date("*t", timestamp)
-    t.hour = 0
-    t.min = 0
-    t.sec = 0
-    return os.time(t)
+-- With lua_mouse_hook = 'on_mouse' in the config, Conky calls this function.
+function conky_on_mouse(event)
+    return hover:mouse(event, os.time())
 end
 
-function TimeToMinutes(timeStr)
-	local hours, minutes = timeStr:match("(%d+):(%d+)")
-	return tonumber(hours) * 60 + tonumber(minutes)
+local function add_event(out, name, date, text)
+    local ts = data_source.timestamp(date, text)
+    if ts then out[#out + 1] = {name = name, ts = ts} end
 end
 
-function GetCurrentTime()
-    local os_time = os.time()
-    local current_time = os.date("%H:%M", os_time)
-    return current_time
+local function midnight_timestamp(date, times)
+    local actual_date = date
+    -- The API's Midnight 00:xx refers to the night following today's Isha.
+    if data_source.minutes(times.Midnight) < data_source.minutes(times.Maghrib) then
+        actual_date = data_source.date_plus(date, 1)
+    end
+    return data_source.timestamp(actual_date, times.Midnight)
 end
 
--- Function to fetch Prayer times
-function FetchPrayerTimes()
-    local now = os.time()
-    DateStamp = NormalizeToDay(now)
-    local latitude = 30.0444
-    local longitude = 31.23575
-    local today_date = os.date("%d-%m-%Y", now + (86400 * DaysAdjustment))
-    local url = "https://api.aladhan.com/v1/timings/" .. today_date .. "?latitude=" .. latitude .. "&longitude=" .. longitude .. "&midnightMode=1"
-    
-    local attempt = 0
-    local success = false
-    local currentRetryDelay = RetryDelay  -- Local copy for this function call
-    
-    print('Fetching Prayer Times...')
-    
-    while attempt < MaxRetries and not success do
-        attempt = attempt + 1
-        print("Attempt " .. attempt .. " of " .. MaxRetries)
-        
-        local response_body = {}
-        local res, code = http.request{
-            url = url,
-            sink = ltn12.sink.table(response_body)
-        }
-        
-        if code == 200 then
-            local response = table.concat(response_body)
-            local data, _, err = json.decode(response, 1, nil)
-            
-            if not err then
-                Fajr = data.data.timings.Fajr
-                Sunrise = data.data.timings.Sunrise
-                Dhuhr = data.data.timings.Dhuhr
-                Asr = data.data.timings.Asr
-                Maghrib = data.data.timings.Maghrib
-                Isha = data.data.timings.Isha
-                Midnight = data.data.timings.Midnight
-                
-                Prayer_times_table = {
-                    Fajr = TimeToMinutes(Fajr), 
-                    Sunrise = TimeToMinutes(Sunrise), 
-                    Dhuhr = TimeToMinutes(Dhuhr), 
-                    Asr = TimeToMinutes(Asr), 
-                    Maghrib = TimeToMinutes(Maghrib), 
-                    Isha = TimeToMinutes(Isha), 
-                    Midnight = TimeToMinutes(Midnight)
-                }
-                if Prayer_times_table['Midnight'] < Prayer_times_table['Maghrib'] then
-                    MidnightAfterMidnight = true
-                    Prayer_times_table['Midnight'] = Prayer_times_table['Midnight'] + (24*60)
-                elseif MidnightAfterMidnight then
-                    MidnightAfterMidnight = false
-                end
-                success = true
-                print('Done Extracting Prayer Times')
-                print('Days adjustment', DaysAdjustment)
-                print('Date', today_date)
-            else
-                print("Error decoding JSON on attempt " .. attempt .. ": " .. tostring(err))
-                if attempt < MaxRetries then
-                    print("Retrying in " .. currentRetryDelay .. " seconds...")
-                    os.execute("sleep " .. currentRetryDelay)
-                    -- Increase delay for next retry (exponential backoff)
-                    currentRetryDelay = currentRetryDelay * 2
-                end
+local function schedule(now)
+    local today = data_source.shift_date(now, 0)
+    local dates = {today, data_source.shift_date(now, -1),
+                   data_source.shift_date(now, 1)}
+    data_source.ensure_dates(dates, now)
+    local today_data = data_source.get(today)
+    local prayers, extras = {}, {}
+    for _, date in ipairs(dates) do
+        local day = data_source.get(date)
+        if day then
+            local times = day.timings
+            for _, name in ipairs(PRAYERS) do
+                add_event(prayers, name, date, times[name])
             end
-        else
-            print("HTTP Error on attempt " .. attempt .. ": " .. tostring(code))
-            if attempt < MaxRetries then
-                print("Retrying in " .. currentRetryDelay .. " seconds...")
-                os.execute("sleep " .. currentRetryDelay)
-                -- Increase delay for next retry (exponential backoff)
-                currentRetryDelay = currentRetryDelay * 2
+            local fajr = data_source.timestamp(date, times.Fajr)
+            local sunrise = data_source.timestamp(date, times.Sunrise)
+            if fajr and sunrise and fajr <= now and now < sunrise then
+                extras[#extras + 1] = {name = 'Sunrise', ts = sunrise}
+            end
+            local isha = data_source.timestamp(date, times.Isha)
+            local midnight = midnight_timestamp(date, times)
+            if isha and midnight and isha <= now and now < midnight then
+                extras[#extras + 1] = {name = 'Midnight', ts = midnight}
             end
         end
     end
-    
-    if not success then
-        print("Failed to fetch Prayer times after " .. MaxRetries .. " attempts")
+    table.sort(prayers, function(a, b) return a.ts < b.ts end)
+    table.sort(extras, function(a, b) return a.ts < b.ts end)
+
+    local previous, upcoming
+    for _, prayer in ipairs(prayers) do
+        if prayer.ts <= now then previous = prayer
+        elseif not upcoming then upcoming = prayer end
     end
-    
-    return success
+    return today_data, prayers, previous, upcoming, extras[1]
 end
 
-function GetCurrentPrayerAndTimeRemaining(prayer_times_table, current_time)
-	for _, prayer in ipairs(Prayers) do
-		local prayer_time = prayer_times_table[prayer]
-        if prayer_time >= current_time and prayer ~= 'Midnight' and prayer ~= 'Sunrise' then			
-            local remainingMinutes = prayer_time - current_time
-            local hours = math.floor(remainingMinutes / 60)
-            local minutes = remainingMinutes % 60
-			return prayer, string.format("%02d", hours), string.format("%02d", minutes), remainingMinutes
+local function shell_quote(value)
+    return "'" .. value:gsub("'", "'\\''") .. "'"
+end
 
+local function check_athan(now, prayers)
+    -- No playback at startup and no late playback after sleep or clock jumps.
+    if ENABLE_ATHAN and last_draw_time and now >= last_draw_time and now - last_draw_time <= 120 then
+        for _, event in ipairs(prayers) do
+            if last_draw_time < event.ts and event.ts <= now
+               and now - event.ts <= 60 and last_athan_event ~= event.ts then
+                last_athan_event = event.ts
+                local audio = base .. 'athan.wav'
+                local f = io.open(audio, 'rb')
+                if f then
+                    f:close()
+                    os.execute('paplay ' .. shell_quote(audio) .. ' >/dev/null 2>&1 &')
+                end
+            end
         end
     end
-
-    -- If no prayer time is found (past last prayer), return to Fajr		
-	local remainingMinutes = (24 * 60) + prayer_times_table['Fajr'] - current_time
-	local hours = math.floor(remainingMinutes / 60)
-	local minutes = remainingMinutes % 60	
-	return 'Fajr', string.format("%02d", hours), string.format("%02d", minutes), remainingMinutes
-
-	
+    last_draw_time = now
 end
 
-
-function GetPreviousPrayerAndTimeElapsed(Prayer_times_table, current_time)
-	
-	for i = #Prayers, 1, -1 do
-		local prayer = Prayers[i]
-		local prayer_time = Prayer_times_table[prayer]
-        if prayer_time < current_time and prayer ~= 'Midnight' and prayer ~= 'Sunrise' then	
-            local elapsedMinutes = current_time - prayer_time
-            local hours = math.floor(elapsedMinutes / 60)
-            local minutes = elapsedMinutes % 60
-			return prayer, string.format("%02d", hours), string.format("%02d", minutes), elapsedMinutes
-
-        end
-    end
-
-    -- If no prayer time is found (past last prayer), return to Isha		
-	local elapsedMinutes = current_time + (24 * 60) - Prayer_times_table['Isha'] 
-	local hours = math.floor(elapsedMinutes / 60)
-	local minutes = elapsedMinutes % 60	
-	return 'Isha', string.format("%02d", hours), string.format("%02d", minutes), elapsedMinutes
-
-	
-end
-
-
--- Fetch Prayer times once
-FetchPrayerTimes()
-
--- Function to draw text with color
-function draw_colored_text(cr, text, font_size, xpos, ypos, red, green, blue, alpha)
-
+local function text(cr, value, font_size, x, y, color)
     cairo_set_font_size(cr, font_size)
-    cairo_set_source_rgba(cr, red, green, blue, alpha)
-    cairo_move_to(cr, xpos, ypos)
-    cairo_show_text(cr, text)
-    cairo_stroke(cr)
+    cairo_set_source_rgba(cr, color[1], color[2], color[3], color[4])
+    cairo_move_to(cr, x, y)
+    cairo_show_text(cr, tostring(value))
 end
 
--- Main function for drawing with Conky
+local function countdown(cr, prefix, event, now, x, y, alert)
+    if not event then return end
+    local seconds = math.max(0, (prefix == 'Since ' and now - event.ts)
+                                  or (event.ts - now))
+    local hh, mm = data_source.hms(seconds)
+    local minute_color = (alert and RED or WHITE)
+    text(cr, prefix .. event.name, FONT_SMALL, x - 10 * SCALE, y, WHITE)
+    text(cr, hh, FONT_LARGE, x, y + FONT_LARGE, WHITE)
+    text(cr, mm, FONT_LARGE, x + FONT_LARGE + 12 * SCALE, y + FONT_LARGE, minute_color)
+end
+
 function conky_main()
-    if conky_window == nil then
-        return
-    end
-    local current_time = TimeToMinutes(GetCurrentTime())
+    if not conky_window then return end
     local now = os.time()
-    local dateStamp = NormalizeToDay(now)
+    local today, events, previous, upcoming, extra = schedule(now)
+    check_athan(now, events)
 
-    if dateStamp > DateStamp then
-        FetchPrayerTimes()
+    local cs, owned = Surface.acquire()
+    if not cs then return end
+    local cr = cairo_create(cs)
+    cairo_select_font_face(cr, FONT, CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL)
+
+    if not today then
+        hover:set_zones(nil)
+        text(cr, 'Fetching prayer times...', FONT_SMALL, 20 * SCALE, 110 * SCALE, WHITE)
+    else
+        local times = today.timings
+        local extents = cairo_text_extents_t:create()
+        local max_width = 0
+        cairo_set_font_size(cr, FONT_LARGE)
+        for _, name in ipairs(LABELS) do
+            cairo_text_extents(cr, times[name], extents)
+            if extents.x_advance > max_width then max_width = extents.x_advance end
+        end
+        local gap = 25 * SCALE
+        local stride = max_width + gap
+        local total = max_width * #LABELS + gap * (#LABELS - 1)
+        local x0 = (conky_window.width - total) / 2
+        local y0 = 150 * SCALE
+        -- Hover only over meaningful visible content, not the huge empty
+        -- transparent area of the window. 'window' in settings.ini restores
+        -- the whole-window behavior if preferred.
+        -- 'fajr_sunrise' is a small, scale-aware hotspot above the first two
+        -- headings (the red-box location in the user's screenshot). It moves
+        -- with the prayer row and doesn't require screen or global coordinates.
+        -- Hover_State.lua compares event.x/event.y in Conky-local pixels.
+        local zone_left = x0 - 22 * SCALE
+        local zone_top = y0 - FONT_LARGE - 75 * SCALE
+        local zone_right = x0 + stride + 50 * SCALE
+        local zone_bottom = y0 - FONT_LARGE + 15 * SCALE
+        if hover.area == 'fajr_sunrise' then
+            hover:set_zones({{zone_left, zone_top, zone_right, zone_bottom}})
+        else
+            -- The 'content' and 'window' options remain available.
+            hover:set_zones({
+                {x0 - 20 * SCALE, 0, x0 + 300 * SCALE, 82 * SCALE},
+                {x0 - 20 * SCALE, 65 * SCALE,
+                 x0 + total + 20 * SCALE, conky_window.height},
+            })
+        end
+        -- Optional temporary outline to show the effective hover hotspot.
+        if hover.area == 'fajr_sunrise' and
+           settings.boolean('behavior', 'hover_debug_outline', false) then
+            cairo_set_source_rgba(cr, 1, 0.28, 0.28, 0.8)
+            cairo_set_line_width(cr, math.max(1, SCALE))
+            cairo_rectangle(cr, zone_left, zone_top,
+                zone_right - zone_left, zone_bottom - zone_top)
+            cairo_stroke(cr)
+        end
+        for i, name in ipairs(LABELS) do
+            local x = x0 + (i - 1) * stride
+            text(cr, name, FONT_SMALL, x - 10 * SCALE, y0 - FONT_LARGE, WHITE)
+            text(cr, times[name], FONT_LARGE, x, y0, WHITE)
+        end
+
+        if previous and (hover:visible(now) or now - previous.ts <= ELAPSED_VISIBLE_SECONDS) then
+            local elapsed = now - previous.ts
+            countdown(cr, 'Since ', previous, now, x0, 20 * SCALE,
+                      elapsed > 5 * 60 and elapsed < 20 * 60)
+        end
+        if upcoming then
+            countdown(cr, 'Till ', upcoming, now, x0, y0 + 30 * SCALE,
+                      upcoming.ts - now <= 15 * 60)
+        end
+        if extra then
+            countdown(cr, 'Till ', extra, now, x0 + stride, y0 + 30 * SCALE,
+                      extra.ts - now <= 15 * 60)
+        end
     end
-
-    local cs = cairo_xlib_surface_create(
-        conky_window.display,
-        conky_window.drawable,
-        conky_window.visual,
-        conky_window.width,
-        conky_window.height
-    )
-    
-
-    local font = "ITC Avant Garde Pro XLt"
-    local font_size = 250
-    local font_small = 100
-    local ypos = (font_size + (font_size/2)) * 2
-    local xmargin = font_size/2
-    local ymargin = font_size/5
-    local alpha = 200/255
-
-    cr = cairo_create(cs)
-    cairo_set_font_size(cr, font_size)
-    cairo_select_font_face(cr, font, CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL)
-    
-
-    local prayer, hours_till, minutes_till, remainingMinutes = GetCurrentPrayerAndTimeRemaining(Prayer_times_table, current_time)
-
-    local prev_prayer, hours_since, minutes_since, elapsedMinutes = GetPreviousPrayerAndTimeElapsed(Prayer_times_table, current_time)
-
-    local min_r, min_g, min_b, min_alpha = 1, 1, 1, alpha -- Default color: white
-    local e_min_r, e_min_g, e_min_b, e_min_alpha = 1, 1, 1, alpha -- Default color: white
-
-    if remainingMinutes < 16 then
-        min_r, min_g, min_b, min_alpha = 200/255, 55/255, 55/255, alpha -- Highlight color: red
-    end
-    if elapsedMinutes > 5 and elapsedMinutes < 20 then
-        e_min_r, e_min_g, e_min_b, e_min_alpha = 200/255, 55/255, 55/255, alpha -- Highlight color: red
-    end
-    
-    local extents = cairo_text_extents_t:create()
-
-    cairo_text_extents(cr, Fajr, extents)
-    local fajr_width = extents.width
-    
-    local total_width = (fajr_width * 7) + (xmargin*6)
-
-    local xpos = (conky_window.width - total_width) / 2 
-    local name_margin_x = ymargin
-    local name_margin_y = font_size
-
-    if  elapsedMinutes < 61 then
-        draw_colored_text(cr, 'Since ' .. prev_prayer, font_small, xpos - name_margin_x, 0 + font_small, 1, 1, 1, alpha)
-        draw_colored_text(cr, hours_since, font_size, xpos, 0 + font_size + font_small, 1, 1, 1, alpha) 
-        draw_colored_text(cr, minutes_since, font_size, xpos + font_size + xmargin/2 , 0 + font_size + font_small, e_min_r, e_min_g, e_min_b, e_min_alpha) 
-    end
-    
-
-    draw_colored_text(cr, 'Fajr', font_small, xpos - name_margin_x, ypos - name_margin_y, 1, 1, 1, alpha)
-    draw_colored_text(cr, Fajr, font_size, xpos, ypos, 1, 1, 1, alpha)
-
-    draw_colored_text(cr, 'Till ' .. prayer, font_small, xpos - name_margin_x, ypos + font_small + ymargin, 1, 1, 1, alpha)
-    draw_colored_text(cr, hours_till, font_size, xpos, ypos + font_size + font_small + ymargin, 1, 1, 1, alpha) 
-    draw_colored_text(cr, minutes_till, font_size, xpos + font_size + xmargin/2 , ypos + font_size + font_small + ymargin, min_r, min_g, min_b, min_alpha) 
-
-    xpos = xpos + fajr_width + xmargin
-    draw_colored_text(cr, 'Sunrise', font_small, xpos - name_margin_x, ypos - name_margin_y, 1, 1, 1, alpha)
-    draw_colored_text(cr, Sunrise, font_size, xpos, ypos, 1, 1, 1, alpha)
-
-    if MidnightAfterMidnight and Prayer_times_table['Fajr'] > current_time and Prayer_times_table['Midnight'] - (24*60) > current_time then
-
-        local remainingMinutes_Midnight = Prayer_times_table['Midnight'] - (24*60) - current_time
-		local hours_Midnight = string.format("%02d", math.floor(remainingMinutes_Midnight / 60))
-		local minutes_Midnight = string.format("%02d", remainingMinutes_Midnight % 60)
-
-        local min_r, min_g, min_b, min_alpha = 1, 1, 1, alpha -- Default color: white
-        if remainingMinutes_Midnight <= 15 then
-            min_r, min_g, min_b, min_alpha = 200/255, 55/255, 55/255, alpha		
-		end
-
-        draw_colored_text(cr, 'Till Midnight', font_small, xpos - name_margin_x, ypos + font_small + ymargin, 1, 1, 1, alpha)
-        draw_colored_text(cr, hours_Midnight, font_size, xpos, ypos + font_size + font_small + ymargin, 1, 1, 1, alpha)
-        draw_colored_text(cr, minutes_Midnight, font_size, xpos + font_size + xmargin/2, ypos + font_size + font_small + ymargin, min_r, min_g, min_b, min_alpha)
-        
-    elseif Prayer_times_table['Isha'] < current_time and Prayer_times_table['Midnight'] > current_time then
-		local remainingMinutes_Midnight = Prayer_times_table['Midnight'] - current_time
-		local hours_Midnight = string.format("%02d", math.floor(remainingMinutes_Midnight / 60))
-		local minutes_Midnight = string.format("%02d", remainingMinutes_Midnight % 60)
-
-        local min_r, min_g, min_b, min_alpha = 1, 1, 1, alpha -- Default color: white
-        if remainingMinutes_Midnight <= 15 then
-            min_r, min_g, min_b, min_alpha = 200/255, 55/255, 55/255, alpha		
-		end
-
-        draw_colored_text(cr, 'Till Midnight', font_small, xpos - name_margin_x, ypos + font_small + ymargin, 1, 1, 1, alpha)
-        draw_colored_text(cr, hours_Midnight, font_size, xpos, ypos + font_size + font_small + ymargin, 1, 1, 1, alpha)
-        draw_colored_text(cr, minutes_Midnight, font_size, xpos + font_size + xmargin/2, ypos + font_size + font_small + ymargin, min_r, min_g, min_b, min_alpha)
-		
-		
-	
-	elseif Prayer_times_table['Fajr'] < current_time and Prayer_times_table['Sunrise'] > current_time then
-
-		local remainingMinutes_Sunrise = Prayer_times_table['Sunrise'] - current_time
-        local hours_Sunrise = string.format("%02d", math.floor(remainingMinutes_Sunrise / 60))
-		local minutes_Sunrise = string.format("%02d", remainingMinutes_Sunrise % 60)
-        local min_r, min_g, min_b, min_alpha = 1, 1, 1, alpha -- Default color: white
-        if remainingMinutes_Sunrise <= 15 then
-            min_r, min_g, min_b, min_alpha = 200/255, 55/255, 55/255, alpha		
-		end
-
-
-        draw_colored_text(cr, 'Till Sunrise', font_small, xpos - name_margin_x, ypos + font_small + ymargin, 1, 1, 1, alpha)
-        draw_colored_text(cr, hours_Sunrise, font_size, xpos, ypos + font_size + font_small + ymargin, 1, 1, 1, alpha)
-        draw_colored_text(cr, minutes_Sunrise, font_size, xpos + font_size + xmargin/2, ypos + font_size + font_small + ymargin, min_r, min_g, min_b, min_alpha)
-
-
-	end    
-    
-    xpos = xpos + fajr_width + xmargin
-    draw_colored_text(cr, 'Dhuhr', font_small, xpos - name_margin_x, ypos - name_margin_y, 1, 1, 1, alpha)
-    draw_colored_text(cr, Dhuhr, font_size, xpos, ypos, 1, 1, 1, alpha)        
-    
-    xpos = xpos + fajr_width + xmargin
-    draw_colored_text(cr, 'Asr', font_small, xpos - name_margin_x, ypos - name_margin_y, 1, 1, 1, alpha)
-    draw_colored_text(cr, Asr, font_size, xpos, ypos, 1, 1, 1, alpha)        
-    
-    xpos = xpos + fajr_width + xmargin
-    draw_colored_text(cr, 'Maghrib', font_small, xpos - name_margin_x, ypos - name_margin_y, 1, 1, 1, alpha)
-    draw_colored_text(cr, Maghrib, font_size, xpos, ypos, 1, 1, 1, alpha)        
-    
-    xpos = xpos + fajr_width + xmargin
-    draw_colored_text(cr, 'Isha', font_small, xpos - name_margin_x, ypos - name_margin_y, 1, 1, 1, alpha)
-    draw_colored_text(cr, Isha, font_size, xpos, ypos, 1, 1, 1, alpha)        
-    
-    xpos = xpos + fajr_width + xmargin
-    draw_colored_text(cr, 'Midnight', font_small, xpos - name_margin_x, ypos - name_margin_y, 1, 1, 1, alpha)
-    draw_colored_text(cr, Midnight, font_size, xpos, ypos, 1, 1, 1, alpha)        
-         
-
-    if remainingMinutes == 0 and not PlayedAthan then
-        PlayedAthan=true
-        os.execute("paplay ~/.config/conky/athan.wav &")
-    elseif remainingMinutes ~= 0 and PlayedAthan then
-        PlayedAthan=false
-    end
-
-    -- Clean up
     cairo_destroy(cr)
-    cairo_surface_destroy(cs)
-    cr = nil
+    Surface.release(cs, owned)
 end

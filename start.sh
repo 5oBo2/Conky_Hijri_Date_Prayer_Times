@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# One launcher for exactly four widgets; transparent Astrolabe replaces old Moon.
+set -euo pipefail
+DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+selection=all
+delay=0
+while (($#)); do
+  case "$1" in
+    --new-only) selection=new; shift ;;
+    --existing-only) selection=both; shift ;;
+    --widget)
+      [[ $# -ge 2 ]] || { echo 'Missing --widget value' >&2; exit 2; }
+      selection="$2"; shift 2 ;;
+    --delay)
+      [[ $# -ge 2 && "$2" =~ ^[0-9]+$ ]] || { echo 'Delay must be a nonnegative integer' >&2; exit 2; }
+      delay="$2"; shift 2 ;;
+    -h|--help)
+      printf 'Usage: bash start.sh [--widget all|prayer|date|weather|sun_moon|both|new] [--delay SECONDS]\n'
+      printf 'Aliases: --new-only (weather + Astrolabe); --existing-only (prayer + Hijri)\n'
+      exit 0 ;;
+    *) echo "Unknown option: $1" >&2; exit 2 ;;
+  esac
+done
+case "$selection" in all|prayer|date|weather|sun_moon|both|new) ;; *) echo "Unknown widget: $selection" >&2; exit 2 ;; esac
+if ! command -v conky >/dev/null 2>&1; then
+  echo 'Conky is missing. Install Conky with Lua/Cairo support.' >&2
+  exit 1
+fi
+if [[ "$delay" != "0" ]]; then sleep "$delay"; fi
+launch() { conky -d -c "$DIR/$1"; }
+case "$selection" in
+  all)      launch conky_date.conf; launch conky_prayer_times.conf; launch conky_weather.conf; launch conky_sun_moon.conf ;;
+  both)     launch conky_date.conf; launch conky_prayer_times.conf ;;
+  new)      launch conky_weather.conf; launch conky_sun_moon.conf ;;
+  date)     launch conky_date.conf ;;
+  prayer)   launch conky_prayer_times.conf ;;
+  weather)  launch conky_weather.conf ;;
+  sun_moon) launch conky_sun_moon.conf ;;
+esac
