@@ -1,15 +1,17 @@
 -- Compact transparent weather widget styled to the supplied 282x155 target.
+-- When appearance.clock_weather_combined = yes, rendering is handled inside Hijri_Date.lua.
 require('cairo')
 local base = debug.getinfo(1, 'S').source:match('^@(.*/)') or './'
 local Surface = dofile(base .. 'Surface.lua')
 local Weather = dofile(base .. 'Weather_Data.lua')
 local settings = dofile(base .. 'Settings.lua')
+local COMBINED = settings.boolean('appearance', 'clock_weather_combined', false)
 local SCALE = settings.scale('weather')
 local FONT = settings.get('appearance', 'font', 'DejaVu Sans')
-local WHITE = {1, 1, 1, 0.96}
-local MUTED = {0.73, 0.81, 0.85, 0.88}
-local BLUE = {0.10, 0.80, 1.0, 1}
-local ORANGE = {1, 0.47, 0.19, 1}
+local WHITE = { 1, 1, 1, 0.96 }
+local MUTED = { 0.73, 0.81, 0.85, 0.88 }
+local BLUE = { 0.10, 0.80, 1.0, 1 }
+local ORANGE = { 1, 0.47, 0.19, 1 }
 local icons = {}
 -- Tunable icon placement (widget-local units, before weather_scale).
 local ICON_X = settings.number('appearance', 'weather_icon_x', 130)
@@ -105,14 +107,14 @@ end
 local function droplet(cr, x, y)
     color(cr, BLUE); cairo_set_line_width(cr, 2)
     cairo_move_to(cr, x, y - 10)
-    cairo_curve_to(cr, x-5, y-2, x-7, y+1, x-5, y+5)
-    cairo_curve_to(cr, x-2, y+10, x+3, y+9, x+5, y+5)
-    cairo_curve_to(cr, x+7, y+1, x+5, y-2, x, y-10)
+    cairo_curve_to(cr, x - 5, y - 2, x - 7, y + 1, x - 5, y + 5)
+    cairo_curve_to(cr, x - 2, y + 10, x + 3, y + 9, x + 5, y + 5)
+    cairo_curve_to(cr, x + 7, y + 1, x + 5, y - 2, x, y - 10)
     cairo_close_path(cr); cairo_stroke(cr)
 end
 
 function conky_main()
-    if not conky_window then return end
+    if not conky_window or COMBINED then return end
     local weather = Weather.get(os.time())
     local surface, owned = Surface.acquire()
     if not surface then return end
@@ -135,7 +137,7 @@ function conky_main()
         -- Use a shared vertical midpoint of both texts' visible ink.
         local ink_top = math.min(high_ext.y_bearing, low_ext.y_bearing)
         local ink_bottom = math.max(high_ext.y_bearing + high_ext.height,
-                                    low_ext.y_bearing + low_ext.height)
+            low_ext.y_bearing + low_ext.height)
         local row_center = reading_baseline + (ink_top + ink_bottom) / 2
 
         local high_arrow_x = 31
