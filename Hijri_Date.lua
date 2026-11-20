@@ -1,5 +1,6 @@
 -- Cairo clock and Hijri date; advances the Hijri date at Maghrib.
--- Supports optional combined "Clock | Weather" mode with hover-reveal details.
+-- Date modes: date_only or date_and_weather (hover-reveal details).
+-- The independent Weather.lua window remains visible in either mode.
 require('cairo')
 local base = debug.getinfo(1, 'S').source:match('^@(.*/)') or './'
 local Surface = dofile(base .. 'Surface.lua')
@@ -21,17 +22,17 @@ local ORANGE = { 1, 0.47, 0.19, 1 }
 local FONT = settings.get('appearance', 'font', 'DejaVu Sans')
 local FONT_CLOCK, FONT_DATE = 160 * SCALE, 40 * SCALE
 
-local COMBINED = settings.boolean('appearance', 'clock_weather_combined', false)
-local COMBINED_CLOCK_SIZE = settings.number('appearance', 'combined_clock_size', 145) * SCALE
-local COMBINED_HOVER_TEMP_SIZE = settings.number('appearance', 'combined_hover_temp_size', 82) * SCALE
-local COMBINED_ICON_BASE = settings.number('appearance', 'combined_weather_icon_size', 72)
-local COMBINED_ICON_DX = settings.number('appearance', 'combined_weather_icon_dx', 0) * SCALE
-local COMBINED_ICON_DY = settings.number('appearance', 'combined_weather_icon_dy', 0) * SCALE
-local hover = Hover.new(settings.number('behavior', 'weather_hover_failsafe_seconds', 4), 'content')
+local DATE_SHOW_WEATHER = settings.date_weather_mode() == 'date_and_weather'
+local DATE_WEATHER_CLOCK_SIZE = settings.number('appearance', 'date_weather_clock_size') * SCALE
+local DATE_WEATHER_HOVER_TEMP_SIZE = settings.number('appearance', 'date_weather_hover_temp_size') * SCALE
+local DATE_WEATHER_ICON_BASE = settings.number('appearance', 'date_weather_icon_size')
+local DATE_WEATHER_ICON_DX = settings.number('appearance', 'date_weather_icon_dx') * SCALE
+local DATE_WEATHER_ICON_DY = settings.number('appearance', 'date_weather_icon_dy') * SCALE
+local hover = Hover.new(settings.number('behavior', 'date_weather_hover_failsafe_seconds'), 'content')
 local icons = {}
 
 function conky_on_mouse(event)
-    if not COMBINED then return false end
+    if not DATE_SHOW_WEATHER then return false end
     return hover:mouse(event, os.time())
 end
 
@@ -54,19 +55,30 @@ local function measure(cr, value, size)
 end
 
 local function icon_code(wmo, day)
-    if wmo == 0 then return day and 32 or 31 end
-    if wmo == 1 then return day and 34 or 33 end
-    if wmo == 2 then return day and 30 or 29 end
-    if wmo == 3 then return 26 end
-    if wmo == 45 or wmo == 48 then return 20 end
-    if wmo >= 51 and wmo <= 57 then return 9 end
-    if wmo >= 61 and wmo <= 65 then return 11 end
-    if wmo == 66 or wmo == 67 then return 9 end
-    if wmo >= 71 and wmo <= 77 then return 13 end
-    if wmo >= 80 and wmo <= 82 then return 39 end
-    if wmo == 85 or wmo == 86 then return 42 end
-    if wmo >= 95 then return 0 end
-    return 26
+    -- Open-Meteo WMO weather_code and is_day -> matching transparent PNG.
+    -- Weather.lua and Hijri_Date.lua deliberately use the same condition
+    -- mapping but render independently, each in its own Conky window.
+    if wmo == 0 then return day and 32 or 31 end                 -- clear
+    if wmo == 1 then return day and 34 or 33 end                 -- mainly clear
+    if wmo == 2 then return day and 30 or 29 end                 -- partly cloudy
+    if wmo == 3 then return 26 end                               -- overcast
+    if wmo == 45 or wmo == 48 then return 20 end                 -- fog/rime fog
+    if wmo == 51 or wmo == 53 then return day and 9 or 45 end   -- drizzle
+    if wmo == 55 then return day and 6 or 45 end                 -- dense drizzle
+    if wmo == 56 or wmo == 57 then return 5 end                  -- freezing drizzle
+    if wmo == 61 then return day and 9 or 45 end                 -- slight rain
+    if wmo == 63 or wmo == 65 then return day and 6 or 45 end   -- moderate/heavy rain
+    if wmo == 66 or wmo == 67 then return 5 end                  -- freezing rain (icy mix proxy)
+    if wmo == 71 then return 13 end                              -- slight snowfall
+    if wmo == 73 or wmo == 75 then return 14 end                 -- moderate/heavy snowfall
+    if wmo == 77 then return 17 end                              -- snow grains/ice pellets proxy
+    if wmo == 80 then return day and 9 or 45 end                 -- slight rain showers
+    if wmo == 81 or wmo == 82 then return day and 6 or 45 end   -- heavier rain showers
+    if wmo == 85 then return day and 41 or 46 end                -- slight snow showers
+    if wmo == 86 then return day and 14 or 46 end                -- heavy snow showers
+    if wmo == 95 or wmo == 97 then return day and 37 or 47 end   -- thunderstorm, incl. heavy
+    if wmo == 96 or wmo == 99 then return 0 end    -- severe / hail thunderstorm
+    return 26                                                   -- unrecognized WMO code
 end
 
 local function draw_icon(cr, id, x, y, size)
@@ -173,19 +185,70 @@ local function draw_weather_details(cr, weather, x_start, baseline_y, s)
     text(cr, humidity, humidity_x, baseline_y, BRIGHT_WHITE)
 end
 
-local function draw_combined_header(cr, now, clock)
+-- Tomorrow through the following two days; compact two-line rows and
+-- tightly spaced icons on the RIGHT. Only the Date hover draws this forecast.
+local function draw_three_day_forecast(cr, weather, clock_top, clock_bottom)
+    local forecast = weather.forecast
+    if not forecast or #forecast ~= 3 then return end
+
+    local day_size = 14 * SCALE
+    local temp_size = 16 * SCALE
+    local icon_size = 27 * SCALE
+    local icon_gap = 6 * SCALE
+    local right_margin = 12 * SCALE
+    local row_step = 42 * SCALE
+
+    -- Measure the widest temperature pair once, so the day/temperature
+    -- labels and the icon column remain aligned for all three days.
+    local text_width = 0
+    local temperatures = {}
+    local forecast_top, forecast_bottom = math.huge, -math.huge
+    for i, day in ipairs(forecast) do
+        temperatures[i] = string.format('%d°/%d°', day.high, day.low)
+        local day_ext = measure(cr, day.day, day_size)
+        local temp_ext = measure(cr, temperatures[i], temp_size)
+        text_width = math.max(text_width, temp_ext.x_advance)
+
+        -- Measure the visible ink and the icon, not just text baselines.
+        -- This keeps the COMPLETE three-row group centered on the clock's
+        -- actual visible height across fonts, scales and temperature widths.
+        local row_offset = (i - 1) * row_step
+        forecast_top = math.min(forecast_top,
+            row_offset + 13 * SCALE + day_ext.y_bearing,
+            row_offset + 32 * SCALE + temp_ext.y_bearing,
+            row_offset + 4 * SCALE)
+        forecast_bottom = math.max(forecast_bottom,
+            row_offset + 13 * SCALE + day_ext.y_bearing + day_ext.height,
+            row_offset + 32 * SCALE + temp_ext.y_bearing + temp_ext.height,
+            row_offset + 4 * SCALE + icon_size)
+    end
+    local top = (clock_top + clock_bottom - forecast_top - forecast_bottom) / 2
+    local icon_x = conky_window.width - right_margin - icon_size
+    local label_x = icon_x - icon_gap - text_width
+
+    for i, day in ipairs(forecast) do
+        local row_y = top + (i - 1) * row_step
+        cairo_set_font_size(cr, day_size)
+        text(cr, day.day, label_x, row_y + 13 * SCALE, WHITE)
+        cairo_set_font_size(cr, temp_size)
+        text(cr, temperatures[i], label_x, row_y + 32 * SCALE, BRIGHT_WHITE)
+        draw_icon(cr, icon_code(day.code, true), icon_x, row_y + 4 * SCALE, icon_size)
+    end
+end
+
+local function draw_date_weather_header(cr, now, clock)
     local weather = Weather.get(now)
     local clock_baseline = 152 * SCALE
-    local clock_ext = measure(cr, clock, COMBINED_CLOCK_SIZE)
+    local clock_ext = measure(cr, clock, DATE_WEATHER_CLOCK_SIZE)
     local clock_top = clock_baseline + clock_ext.y_bearing
 
     local temp_num = weather and string.format('%d', weather.temperature) or '--'
     local temp_full = temp_num .. '°'
-    local idle_num_ext = measure(cr, temp_num, COMBINED_CLOCK_SIZE)
-    local idle_full_ext = measure(cr, temp_full, COMBINED_CLOCK_SIZE)
+    local idle_num_ext = measure(cr, temp_num, DATE_WEATHER_CLOCK_SIZE)
+    local idle_full_ext = measure(cr, temp_full, DATE_WEATHER_CLOCK_SIZE)
 
-    local icon_size = COMBINED_ICON_BASE * SCALE
-    local icon_rel_x = idle_num_ext.x_advance + COMBINED_ICON_DX
+    local icon_size = DATE_WEATHER_ICON_BASE * SCALE
+    local icon_rel_x = idle_num_ext.x_advance + DATE_WEATHER_ICON_DX
     local weather_w = math.max(idle_full_ext.x_advance, icon_rel_x + icon_size)
 
     local div_gap = 22 * SCALE
@@ -196,13 +259,13 @@ local function draw_combined_header(cr, now, clock)
 
     hover:set_zones({ {
         div_x,
-        math.max(0, clock_top - 15 * SCALE),
-        weather_x + math.max(weather_w, 185 * SCALE) + 15 * SCALE,
+        0, -- includes the first forecast row, above the clock numerals
+        conky_window.width, -- hover stays active over the right forecast area
         clock_baseline + 18 * SCALE,
     } })
 
     -- Clock
-    cairo_set_font_size(cr, COMBINED_CLOCK_SIZE)
+    cairo_set_font_size(cr, DATE_WEATHER_CLOCK_SIZE)
     text(cr, clock, start_x, clock_baseline, WHITE)
 
     -- Divider
@@ -210,24 +273,26 @@ local function draw_combined_header(cr, now, clock)
 
     -- Weather (Idle vs Hover)
     if weather and hover:visible(now) then
-        local ratio = COMBINED_HOVER_TEMP_SIZE / COMBINED_CLOCK_SIZE
-        local small_num_ext = measure(cr, temp_num, COMBINED_HOVER_TEMP_SIZE)
+        local ratio = DATE_WEATHER_HOVER_TEMP_SIZE / DATE_WEATHER_CLOCK_SIZE
+        local small_num_ext = measure(cr, temp_num, DATE_WEATHER_HOVER_TEMP_SIZE)
         local small_baseline = clock_top - small_num_ext.y_bearing + 2 * SCALE
         local small_icon_size = icon_size * ratio
-        local small_icon_x = weather_x + small_num_ext.x_advance + COMBINED_ICON_DX * ratio
-        local small_icon_y = small_baseline - small_icon_size * 0.86 + COMBINED_ICON_DY * ratio
+        local small_icon_x = weather_x + small_num_ext.x_advance + DATE_WEATHER_ICON_DX * ratio
+        local small_icon_y = small_baseline - small_icon_size * 0.86 + DATE_WEATHER_ICON_DY * ratio
 
-        cairo_set_font_size(cr, COMBINED_HOVER_TEMP_SIZE)
+        cairo_set_font_size(cr, DATE_WEATHER_HOVER_TEMP_SIZE)
         text(cr, temp_full, weather_x, small_baseline, BRIGHT_WHITE)
         draw_icon(cr, icon_code(weather.code, weather.is_day == 1),
             small_icon_x, small_icon_y, small_icon_size)
         draw_weather_details(cr, weather, weather_x, clock_baseline - 2 * SCALE, SCALE)
+        local clock_bottom = clock_baseline + clock_ext.y_bearing + clock_ext.height
+        draw_three_day_forecast(cr, weather, clock_top, clock_bottom)
     else
-        cairo_set_font_size(cr, COMBINED_CLOCK_SIZE)
+        cairo_set_font_size(cr, DATE_WEATHER_CLOCK_SIZE)
         text(cr, temp_full, weather_x, clock_baseline, WHITE)
         if weather then
             local icon_x = weather_x + icon_rel_x
-            local icon_y = clock_baseline - icon_size * 0.86 + COMBINED_ICON_DY
+            local icon_y = clock_baseline - icon_size * 0.86 + DATE_WEATHER_ICON_DY
             draw_icon(cr, icon_code(weather.code, weather.is_day == 1),
                 icon_x, icon_y, icon_size)
         end
@@ -262,8 +327,8 @@ function conky_main()
     local y_gregorian = FONT_CLOCK + FONT_DATE + (FONT_DATE / 1.5)
     local y_hijri = y_gregorian + FONT_DATE + (FONT_DATE / 3)
 
-    if COMBINED then
-        draw_combined_header(cr, now, clock)
+    if DATE_SHOW_WEATHER then
+        draw_date_weather_header(cr, now, clock)
     else
         hover:set_zones(nil)
         cairo_set_font_size(cr, FONT_CLOCK)

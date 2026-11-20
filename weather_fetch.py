@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Non-blocking worker for the two new Conky widgets; Python stdlib only.
+"""Shared weather/sun cache worker for the independent Conky widgets; stdlib only.
 
 Uses Open-Meteo forecast and (if city mode) geocoding. The shared cache is
 atomically replaced; an advisory lock avoids duplicate concurrent downloads.
@@ -95,9 +95,10 @@ def make_cache(payload, signature, now=None):
     # Interpreting these as UTC dates breaks locations east of Greenwich (e.g.
     # Cairo's local 00:00 is 22:00 UTC on the previous calendar date).
     dates = daily['time']
-    required = ('sunrise', 'sunset', 'temperature_2m_max', 'temperature_2m_min')
-    if len(dates) < 3 or any(len(daily[k]) != len(dates) for k in required):
-        raise ValueError('Expected matching daily forecast arrays spanning yesterday and tomorrow')
+    required = ('sunrise', 'sunset', 'temperature_2m_max',
+                'temperature_2m_min', 'weather_code')
+    if len(dates) < 5 or any(len(daily[k]) != len(dates) for k in required):
+        raise ValueError('Expected matching daily arrays: yesterday, today and next three days')
     local_today = dt.datetime.fromtimestamp(now, tz).date()
     forecast_dates = [dt.datetime.fromtimestamp(int(ts), tz).date() for ts in dates]
     if len(set(forecast_dates)) != len(forecast_dates):
@@ -106,8 +107,11 @@ def make_cache(payload, signature, now=None):
         today_index = forecast_dates.index(local_today)
     except ValueError as exc:
         raise ValueError('Forecast does not contain today in the location timezone; retry') from exc
-    if today_index == 0 or today_index == len(dates) - 1:
-        raise ValueError('Forecast is missing yesterday or tomorrow; retry')
+    if today_index == 0 or today_index + 3 >= len(dates):
+        raise ValueError('Forecast is missing yesterday or any of the next three days; retry')
+    for offset in range(1, 4):
+        if forecast_dates[today_index + offset] != local_today + dt.timedelta(days=offset):
+            raise ValueError('Daily forecast contains a gap after today')
     previous_index, next_index = today_index - 1, today_index + 1
     def stamp(v):
         result = int(v)
@@ -122,6 +126,23 @@ def make_cache(payload, signature, now=None):
     }
     if not (events['yesterday_sunset'] < events['sunrise'] < events['sunset'] < events['tomorrow_sunrise']):
         raise ValueError('Sunrise/sunset order invalid')
+    # Daily weather_code describes the entire day's weather; the Date renderer
+    # therefore uses the daytime variant of the matching condition icon.
+    weekdays = ('Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun')
+    forecast = {}
+    for offset in range(1, 4):
+        index = today_index + offset
+        prefix = f'forecast_{offset}_'
+        forecast[prefix + 'day'] = weekdays[forecast_dates[index].weekday()]
+        forecast[prefix + 'high'] = str(rounded(
+            daily['temperature_2m_max'][index], prefix + 'high', -110, 70))
+        forecast[prefix + 'low'] = str(rounded(
+            daily['temperature_2m_min'][index], prefix + 'low', -110, 70))
+        forecast[prefix + 'code'] = str(rounded(
+            daily['weather_code'][index], prefix + 'code', 0, 99))
+        if int(forecast[prefix + 'high']) < int(forecast[prefix + 'low']):
+            raise ValueError('Daily maximum cannot be below minimum')
+
     values = {
         'signature': signature,
         'fetched': str(int(now)),
@@ -132,6 +153,10 @@ def make_cache(payload, signature, now=None):
         'low': str(rounded(daily['temperature_2m_min'][today_index], 'low', -110, 70)),
         'code': str(rounded(current['weather_code'], 'code', 0, 99)),
         'is_day': str(rounded(current['is_day'], 'is_day', 0, 1)),
+        # Local midnight tomorrow, as an absolute timestamp. On a new day an
+        # old cache must not show yesterday's three-day forecast as current.
+        'forecast_valid_until': str(int(dates[next_index])),
+        **forecast,
         **{key: str(ts) for key, ts in events.items()},
         'sunrise_label': dt.datetime.fromtimestamp(events['sunrise'], tz).strftime('%H:%M'),
         'sunset_label': dt.datetime.fromtimestamp(events['sunset'], tz).strftime('%H:%M'),
@@ -139,16 +164,19 @@ def make_cache(payload, signature, now=None):
     for key, value in values.items():
         if any(c in key+value for c in '\n\r'):
             raise ValueError('Unexpected newline in weather cache')
-    return 'CONKY_SUN_WEATHER_V1\n' + ''.join(f'{k}={v}\n' for k, v in values.items())
+    return 'CONKY_SUN_WEATHER_V2\n' + ''.join(f'{k}={v}\n' for k, v in values.items())
 
 
 def cache_fresh(signature, ttl):
     try:
         lines = CACHE.read_text(encoding='utf-8').splitlines()
-        if lines[0] != 'CONKY_SUN_WEATHER_V1':
+        if lines[0] != 'CONKY_SUN_WEATHER_V2':
             return False
         values = dict(line.split('=', 1) for line in lines[1:])
-        return (values['signature'] == signature and 0 <= time.time() - int(values['fetched']) <= ttl)
+        now = time.time()
+        return (values['signature'] == signature
+                and 0 <= now - int(values['fetched']) <= ttl
+                and now < int(values['forecast_valid_until']))
     except (ValueError, KeyError, OSError, IndexError):
         return False
 
@@ -185,9 +213,9 @@ def main(argv=None):
         payload = get_json('https://api.open-meteo.com/v1/forecast', {
             'latitude': lat, 'longitude': lon,
             'current': 'temperature_2m,relative_humidity_2m,weather_code,is_day',
-            'daily': 'temperature_2m_max,temperature_2m_min,sunrise,sunset',
+            'daily': 'temperature_2m_max,temperature_2m_min,weather_code,sunrise,sunset',
             'temperature_unit': 'celsius', 'timezone': 'auto',
-            'timeformat': 'unixtime', 'past_days': 1, 'forecast_days': 2,
+            'timeformat': 'unixtime', 'past_days': 1, 'forecast_days': 4,
         })
         content = make_cache(payload, signature)
         write_atomic(content)

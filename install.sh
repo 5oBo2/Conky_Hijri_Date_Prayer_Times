@@ -1,19 +1,17 @@
 #!/usr/bin/env bash
-# Install one canonical 4-widget project to ~/.config/conky.
+# Install the four-widget project exactly as supplied; no migrations or aliases.
 set -euo pipefail
 SOURCE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 DEST="${XDG_CONFIG_HOME:-$HOME/.config}/conky"
 AUTOSTART="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
 make_autostart=1
 run_wizard=1
-reset_settings=0
 for opt in "$@"; do
   case "$opt" in
     --no-autostart) make_autostart=0 ;;
     --no-configure) run_wizard=0 ;;
-    --reset-settings) reset_settings=1 ;;
     -h|--help)
-      printf 'Usage: bash install.sh [--no-autostart] [--no-configure] [--reset-settings]\n'
+      printf 'Usage: bash install.sh [--no-autostart] [--no-configure]\n'
       exit 0 ;;
     *) printf 'Unknown option: %s\n' "$opt" >&2; exit 2 ;;
   esac
@@ -34,15 +32,10 @@ if [[ "$SOURCE" != "$DEST" ]]; then
     Hover_State.lua Settings.lua prayer_fetch.py
     Weather.lua Weather_Data.lua weather_fetch.py Sun_Moon_Astrolabe.lua
     conky_prayer_times.conf conky_date.conf conky_weather.conf conky_sun_moon.conf
-    configure.py layout.py upgrade_settings.py doctor.py
-    start.sh restart.py restart_new.py install.sh
+    configure.py layout.py doctor.py start.sh restart.py install.sh
     settings.ini README.md HOVER_ZONE.md
   )
   for filename in "${files[@]}"; do
-    if [[ "$filename" == settings.ini && -f "$DEST/settings.ini" && "$reset_settings" == 0 ]]; then
-      echo 'Keeping your existing settings.ini (use --reset-settings to replace it).'
-      continue
-    fi
     cp -- "$SOURCE/$filename" "$DEST/$filename"
   done
   if [[ -f "$SOURCE/athan.wav" ]]; then
@@ -50,36 +43,11 @@ if [[ "$SOURCE" != "$DEST" ]]; then
   fi
   mkdir -p -- "$DEST/assets"
   cp -a -- "$SOURCE/assets/weather" "$DEST/assets/"
-
 fi
-# Tidy a previously installed Weather-v2/Celestial folder, even if the user
-# extracted this package directly into ~/.config/conky. Always back up first.
-legacy=(
-  Sun_Moon.lua conky_sun_moon_astrolabe.conf start_astrolabe.sh
-  README_ASTROLABE.md NEW_WIDGETS.md REFINEMENT_V2.md
-  Astrolabe_Preview.html Astrolabe_Preview.png
-)
-needs_prune=0
-for old in "${legacy[@]}"; do
-  [[ ! -e "$DEST/$old" ]] || needs_prune=1
-done
-[[ ! -e "$DEST/assets/moon" && ! -e "$DEST/assets/moon_old" ]] || needs_prune=1
-if [[ "$needs_prune" == 1 ]]; then
-  if [[ "$SOURCE" == "$DEST" ]]; then
-    BACKUP="${DEST}-backup-$(date +%Y%m%d-%H%M%S)-$$"
-    cp -a -- "$DEST" "$BACKUP"
-    echo "Existing Conky folder backed up before migration: $BACKUP"
-  fi
-  for old in "${legacy[@]}"; do
-    rm -f -- "$DEST/$old"
-  done
-  rm -rf -- "$DEST/assets/moon" "$DEST/assets/moon_old"
-  echo 'Removed retired Sun/Moon files and version-specific notes; current README.md is canonical.'
-fi
-python3 "$DEST/upgrade_settings.py"
+# Retired scripts are not part of the current project and are never run.
+rm -f -- "$DEST/upgrade_settings.py" "$DEST/restart_new.py"
 chmod +x "$DEST/start.sh" "$DEST/install.sh" "$DEST/configure.py" \
-  "$DEST/restart.py" "$DEST/restart_new.py" "$DEST/doctor.py" \
-  "$DEST/prayer_fetch.py" "$DEST/weather_fetch.py" "$DEST/upgrade_settings.py"
+  "$DEST/restart.py" "$DEST/doctor.py" "$DEST/prayer_fetch.py" "$DEST/weather_fetch.py"
 if [[ "$make_autostart" == 1 ]]; then
   mkdir -p -- "$AUTOSTART"
   escaped_dest="${DEST//\\/\\\\}"

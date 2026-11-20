@@ -36,6 +36,14 @@ function M.boolean(section_name, key, default)
     local v = tostring(M.get(section_name, key, default and 'yes' or 'no')):lower()
     return v == 'yes' or v == 'true' or v == '1' or v == 'on'
 end
+-- Date appearance has exactly two supported modes. No alternative keys.
+-- This setting never changes the standalone Weather window.
+function M.date_weather_mode()
+    local mode = M.get('appearance', 'date_weather_mode')
+    assert(mode == 'date_only' or mode == 'date_and_weather',
+        'appearance.date_weather_mode must be date_only or date_and_weather')
+    return mode
+end
 function M.scale(kind)
     local n = M.number('appearance', kind .. '_scale', 1)
     assert(n >= 0.3 and n <= 3, kind .. '_scale must be between 0.3 and 3')

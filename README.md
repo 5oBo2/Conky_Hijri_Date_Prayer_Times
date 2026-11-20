@@ -1,171 +1,294 @@
-# Conky — Four Transparent Widgets (Unified Edition)
+# Conky: four independent widgets
 
-**One folder, one `settings.ini`, one installer, and one layout wizard.** This combines the three source archives into four independently placed, independently scaled Conky windows for Linux/KDE Plasma:
+A single-folder Conky project for Linux/KDE, with one `settings.ini` and four **independent windows**:
 
-| Widget | Source preserved | Config + renderer | Scale and placement keys |
-|---|---|---|---|
-| **Prayer Times** | `Archive.zip` (original prayer logic, countdown, hover, Athan) | `conky_prayer_times.conf` → `Prayer_Times.lua` | `prayer_scale`, `prayer_x`, `prayer_y` |
-| **Gregorian/Hijri Date & Clock** | `Archive.zip` (original Hijri/Maghrib rollover + optional combined `Clock \| Weather` mode) | `conky_date.conf` → `Hijri_Date.lua` | `date_scale`, `date_x`, `date_y` |
-| **Weather v2** | `Conky_Weather_SunMoon_v2_Patch.zip` (weather visuals and sizing/positioning) | `conky_weather.conf` → `Weather.lua` | `weather_scale`, `weather_x`, `weather_y` |
-| **Celestial Astrolabe** | `Celestial_Astrolabe_Transparent_Complete_Project.zip` (latest fully transparent moon design) | `conky_sun_moon.conf` → `Sun_Moon_Astrolabe.lua` | `sun_moon_scale`, `sun_moon_x`, `sun_moon_y` |
+| Widget | Rendering files | Independent size / placement |
+| --- | --- | --- |
+| Prayer Times | `Prayer_Times.lua`, `conky_prayer_times.conf` | `prayer_scale`, `prayer_x`, `prayer_y` |
+| Clock + Gregorian/Hijri Date | `Hijri_Date.lua`, `conky_date.conf` | `date_scale`, `date_x`, `date_y` |
+| Weather | `Weather.lua`, `conky_weather.conf` | `weather_scale`, `weather_x`, `weather_y` |
+| Celestial Astrolabe | `Sun_Moon_Astrolabe.lua`, `conky_sun_moon.conf` | `sun_moon_scale`, `sun_moon_x`, `sun_moon_y` |
 
-**There is no old Sun/Moon widget in this project.** The Astrolabe is the only sun/moon renderer and is the one launched by `start.sh`/KDE Autostart. It has **no rectangular background, card, shadow or backdrop**. All four read the *same* `appearance.font`, default **ITC Avant Garde Pro XLt** (the font itself is **not** distributed). Weather icons are in `assets/weather/`; the Astrolabe moon is drawn in Cairo and does not need the old `assets/moon/` images.
+Every window is launched separately, and changing the Date display mode **never** hides, moves, resizes, stops or changes the standalone Weather widget. Both weather displays read shared Open-Meteo data, but draw independently.
 
-## 1. Install
+## 1. Apply the vertically centered forecast fix
 
-Requires Linux, Python 3, Conky compiled with Lua and Cairo, and (for prayer and combined-weather hover) Conky mouse-events support. For the optional Athan, install `paplay` and provide your own `athan.wav`. Use `fc-match 'ITC Avant Garde Pro XLt'` to verify the font is installed or choose an installed font in `settings.ini`. No Python pip packages are required.
+This ZIP contains **only three complete replacement files**:
 
-Extract the ZIP, open a terminal **inside the extracted `Conky_Unified_Four_Widgets` folder**, and run:
+- `Hijri_Date.lua` — vertically centers the existing three-row hover forecast
+  against the clock's visible bounds, and fixes the same missing WMO code `97`.
+- `Weather.lua` — recognizes Open-Meteo code `97` as a thunderstorm rather
+  than incorrectly falling back to cloudy; no Weather layout/behavior changes.
+- `README.md` — updated installation and weather-code verification notes.
 
-    bash install.sh
+This patch applies **on top of the existing three-day forecast update**. Keep
+`weather_fetch.py`, `Weather_Data.lua`, your `settings.ini`, and the expanded
+20-icon `assets/weather/` collection as they are. Standalone Weather remains
+independent and only gains the code `97` mapping fix.
 
-The installer:
+1. Back up the installed project:
 
-1. Copies the four-widget project to **`~/.config/conky/`** (or `$XDG_CONFIG_HOME/conky`). If a Conky directory exists, first creates a full timestamped backup alongside it.
-2. **Preserves your existing `settings.ini` by default** and upgrades it by adding missing weather/Astrolabe keys. Existing prayer/Hijri location, behavior, sizes, and placement remain intact. `--reset-settings` explicitly replaces those values with the bundled defaults (after backup).
-3. Moves explicit `sun_moon_astrolabe_x/y` coordinates from an earlier alternate Astrolabe installation into the canonical `sun_moon_x/y` coordinates, if you had set them. Otherwise, it preserves `sun_moon_x/y` from the older Weather v2 widget.
-4. Replaces the old moon renderer with the Astrolabe, removes superseded known moon files from the installed folder **after backing them up**, and installs a single KDE/XDG Autostart entry called `conky-prayer-clock.desktop` for all four widgets.
-5. In an interactive terminal, offers to launch the shared setup wizard for **all four**. On noninteractive installations, run the wizard yourself using the commands below.
+   ```bash
+   cp -a ~/.config/conky ~/.config/conky-backup-$(date +%Y%m%d-%H%M%S)
+   ```
 
-Want to test first without replacing any installed files? You can run the scripts **directly in the extracted folder**, and keep them separate from `~/.config/conky`:
+2. Extract the ZIP into `~/.config/conky/`, overwriting **only those three files**.
 
-    python3 configure.py --check
-    python3 configure.py --layout --widget all
-    bash start.sh
+3. Restart Date and Weather to load the updated icon mapping and drawing code:
 
-An installed Conky instance launched from the earlier folder may still be running after installing. Use the safe restart command from the installed directory rather than launching a second copy. If you previously created any *other* Autostart entries for separate widgets, disable those to avoid duplicates at login.
+   ```bash
+   python3 ~/.config/conky/restart.py --widget date
+   python3 ~/.config/conky/restart.py --widget weather
+   ```
 
-Optional installation flags:
+   The independent Weather widget keeps its existing size and position. There
+   is no need to refresh the weather cache just to apply these code changes.
 
-    bash install.sh --no-autostart --no-configure   # install but do not change autostart / prompt
-    bash install.sh --reset-settings               # reset configuration to bundled defaults
+## Date hover forecast design
 
-## 2. One shared configuration
+With `date_weather_mode = date_and_weather`, hovering over the Date widget's
+weather area reveals the **next three calendar days**, starting **tomorrow**.
+Each row is minimalist and right-aligned into the unused space beside the clock:
 
-The **only settings file** to maintain is `~/.config/conky/settings.ini` after installation. You can edit it by hand, or run:
+```text
+Fri       [icon]
+47°/34°
 
-    python3 ~/.config/conky/configure.py                  # interactive menu, defaults to all four
-    python3 ~/.config/conky/configure.py --widget all     # all settings + all widgets
-    python3 ~/.config/conky/configure.py --widget prayer  # Prayer only
-    python3 ~/.config/conky/configure.py --widget date    # Hijri/clock only
-    python3 ~/.config/conky/configure.py --widget weather # Weather v2 only
-    python3 ~/.config/conky/configure.py --widget sun_moon # transparent Astrolabe only
-    python3 ~/.config/conky/configure.py --widget shared # shared location, prayer method and font
-    python3 ~/.config/conky/configure.py --widget new    # Weather + Astrolabe (legacy shortcut)
-    python3 ~/.config/conky/configure.py --widget both   # Prayer + Hijri (legacy shortcut)
+Sat       [icon]
+45°/32°
 
-Use `--widget all` for the initial setup. Press **Enter** at any wizard prompt to keep the displayed value. The editor preserves the comments in the INI file. The interactive wizard asks whether to keep existing placement, **auto-place by monitor/corner**, or enter absolute **X/Y** manually.
+Sun       [icon]
+43°/30°
+```
 
-The four independent scales are `prayer_scale`, `date_scale`, `weather_scale`, `sun_moon_scale` (0.3–3.0). At scale 1.0, expected Conky bounds are **1100×255**, **700×290**, **340×172**, and **416×432**, respectively. These are allocated window sizes; the Astrolabe has a transparent window inside those bounds. `weather_icon_x`, `weather_icon_y`, and `weather_icon_size` move/size only the standalone weather image without scaling the widget text.
+The example values are illustrative. In the actual layout, each icon is only
+**6 logical pixels** to the right of the temperature text column, and each icon
+is centered alongside its two-line day/temperatures group. The display is
+transparent, without arrows, labels, outlines, or animation. Three fixed rows
+use small text and icons to avoid colliding with the current-weather details
+or the Gregorian/Hijri dates. The forecast hides again when hover ends.
 
-### Optional Combined `Clock | Weather` Mode
+The three-row forecast is vertically centered against the clock's **visible
+glyph bounds**, not pinned to the top of the Conky window. This works with the
+configured Date font and `date_scale`, without moving the clock or the dates.
+The weather icons remain beside their temperatures (6 scaled pixels before
+the PNG's transparent padding), in a consistent right-aligned icon column.
 
-Set `clock_weather_combined = yes` in `[appearance]` (and run `python3 restart.py`) to render the clock and current temperature side by side inside `Hijri_Date.lua` (`conky_date.conf`), separated by a vertical gradient divider (`0508 | 15°`) with the weather icon tucked beneath `°`:
+The forecast uses Open-Meteo's *daily* `weather_code`, not the current hourly
+`is_day` field, so it intentionally chooses the **daytime variant** of the
+matching PNG for each daily summary. The current temperature/icon and the
+separate Weather widget retain their usual current-condition day/night rules.
 
-* **Idle:** temperature matches the clock height; high, low, and humidity stay hidden.
-* **On hover over the weather area:** the temperature shrinks and shifts upward to reveal today's high, low, and humidity underneath (`weather_hover_failsafe_seconds`, default `4`, controls the Wayland failsafe timeout independently from Prayer's `hover_failsafe_seconds`).
-* **Standalone Weather window:** when `clock_weather_combined = yes`, `conky_weather.conf` idles at `1×1` and `Weather.lua` skips drawing so it does not intercept mouse events.
-* **Tuning keys (in unscaled units before `date_scale`):** `combined_clock_size`, `combined_hover_temp_size`, `combined_weather_icon_size`, `combined_weather_icon_dx`, and `combined_weather_icon_dy`.
-* **Revert anytime:** set `clock_weather_combined = no` and run `python3 restart.py` to return to separate Date and Weather widgets using your preserved `weather_*` and `date_*` settings.
+### Check whether the forecast icons are correct
 
-`font` is shared across all four. Default `ITC Avant Garde Pro XLt` is used in every Cairo renderer. If your computer doesn't have it, set a font reported by `fc-list` / `fc-match`.
+For forecast days, the Open-Meteo *daily* WMO code is mapped as follows:
+`0` = clear (`32.png`), `1` = mainly clear (`34.png`), `2` = partly cloudy
+(`30.png`), and `3` = overcast (`26.png`). WMO code `97` (heavy thunderstorm)
+uses the thunderstorm icon (`37.png` by day / `47.png` by night) rather than
+the cloudy fallback. Other WMO conditions use the
+expanded mapping in section 3. A cloudy icon on all three days is correct
+**only if the cached `forecast_1_code`, `forecast_2_code` and
+`forecast_3_code` are all `3`**. Current conditions use a separate
+`current.weather_code` (stored as `code` in the cache), so the current icon
+can differ from the daily one.
 
-The original prayer and Hijri configuration remains available: `location.mode` (`city` or `coordinates`), city/country or lat/lon, Aladhan `method`, `school`, `midnight_mode`, `hijri_offset_days`, `elapsed_minutes`, `hover_area`, `hover_failsafe_seconds`, `hover_debug_outline`, and `athan_enabled`. The weather worker uses the **same** location and `weather_refresh_minutes` (5–180).
+Check the **exact values shown by your installed widget**:
 
-**Important timezone requirement:** The source prayer/clock logic interprets the selected location's prayer clock times using your computer's local timezone. Keep your system timezone aligned with your configured location (check `timedatectl`). For remote locations in other timezones, displayed prayer boundaries may be wrong. Hijri changes at the selected location's Maghrib. Compare prayer times with your mosque when necessary.
+```bash
+grep -E '^forecast_[123]_(day|high|low|code)=' "${XDG_CACHE_HOME:-$HOME/.cache}/conky-sun-weather/weather.cache"
+```
 
-## 3. Place all four anywhere on your monitors
+To query Open-Meteo directly, use these example coordinates from the
+included default `settings.ini` (Cairo). **Replace latitude/longitude with
+your own installed `[location]` coordinates if different**:
 
-The layout wizard from `Archive.zip` + Weather v2 now works across the four widgets and understands the **larger Astrolabe footprint**:
+```bash
+curl -fsSG 'https://api.open-meteo.com/v1/forecast' \
+  --data-urlencode 'latitude=30.0444' \
+  --data-urlencode 'longitude=31.23575' \
+  --data-urlencode 'daily=weather_code,temperature_2m_max,temperature_2m_min' \
+  --data-urlencode 'timezone=auto' \
+  --data-urlencode 'forecast_days=4' \
+  | python3 -m json.tool
+```
 
-    python3 ~/.config/conky/configure.py --screens
-    python3 ~/.config/conky/configure.py --layout --widget all
-    python3 ~/.config/conky/configure.py --check-layout --widget all
+The first item is *today*; the next three items correspond to the three
+hover rows. The API can update after the cache was fetched, so compare the cache first.
+Refresh it with `python3 ~/.config/conky/weather_fetch.py --force` when you
+want the widget to use newly fetched codes.
 
-For each widget separately, the assistant asks which monitor to use, what scale to apply, which anchor to use (top-left, center, bottom-right, etc.) and what margins to keep. It writes the chosen `*_scale` and `*_x/*_y` directly to `settings.ini`. Different widgets may be on different monitors. It detects geometry with KDE's `kscreen-doctor -o`/`-j`, then XRandR on X11, or falls back to manually saved geometry. On Wayland, Conky/XWayland coordinates can behave differently from the compositor's logical geometry; visually verify positions.
+No extra setting is required; the forecast obeys `date_scale` and is enabled
+only when the existing Date display mode is `date_and_weather`. In `date_only`,
+no date weather or forecast is drawn. The standalone Weather widget is always
+independent and is **not** given a forecast hover.
 
-If automatic monitor detection fails:
+## 2. Date modes
 
-    python3 ~/.config/conky/configure.py --manual-screens
-    python3 ~/.config/conky/configure.py --layout --widget all
+Edit `~/.config/conky/settings.ini` in `[appearance]`:
 
-To place **just one** widget without changing the other three:
+```ini
+# Clock + dates, with no weather elements inside the Date window
+date_weather_mode = date_only
+```
 
-    python3 ~/.config/conky/configure.py --layout --widget sun_moon
-    python3 ~/.config/conky/configure.py --check-layout --widget sun_moon
+or:
 
-To keep separate *full-desktop* and *compact* positioning/scaling presets (presets do **not** change location or prayer behavior):
+```ini
+# Clock + dates + current temperature/icon, with hover details inside Date
+date_weather_mode = date_and_weather
+```
 
-    python3 ~/.config/conky/configure.py --save-layout full --widget all
-    python3 ~/.config/conky/configure.py --save-layout compact --widget all
-    python3 ~/.config/conky/configure.py --list-layouts
-    python3 ~/.config/conky/configure.py --use-layout full --widget all
-    python3 ~/.config/conky/configure.py --use-layout compact --widget all
+These are the **only two valid values**. The `date_weather_mode` key is required. The separate Weather Conky window renders in **both** cases and retains its own position, scale and icon settings.
 
-You can also save/restore a preset for only `weather`, `date`, `prayer` or `sun_moon`. Layouts live in `~/.config/conky/layouts/` and saved monitor geometry in `monitor_geometry.json`. These files are not overwritten during installation.
+Date-only weather display controls (under `[appearance]`):
 
-## 4. Launch and restart (avoid duplicate windows)
+| Setting | Purpose |
+| --- | --- |
+| `date_weather_clock_size` | Clock size for Date's weather header before `date_scale` |
+| `date_weather_hover_temp_size` | Temperature size when hovering inside Date |
+| `date_weather_icon_size` | Icon size inside Date |
+| `date_weather_icon_dx`, `date_weather_icon_dy` | Date weather icon nudges |
 
-    bash ~/.config/conky/start.sh                    # launch all four, e.g. at login
-    bash ~/.config/conky/start.sh --new-only         # Weather + Astrolabe
-    bash ~/.config/conky/start.sh --existing-only    # Prayer + Hijri
-    bash ~/.config/conky/start.sh --widget sun_moon  # only the Astrolabe
+Under `[behavior]`, `date_weather_hover_failsafe_seconds` controls the Date header's weather-detail hover timeout. None of these change the standalone Weather renderer.
 
-`start.sh` starts new Conky processes. **After changing settings, use `restart.py`**, which stops only matching Conky instances from this installation before launching them again, without calling `killall conky` or disturbing unrelated Conky programs:
+Standalone Weather controls are `weather_scale`, `weather_icon_x`, `weather_icon_y`, `weather_icon_size`, `weather_x`, and `weather_y`. Shared `weather_refresh_minutes` controls how often the weather worker refreshes the common cache. All four widgets share `appearance.font` and `[location]`.
 
-    python3 ~/.config/conky/restart.py                       # safe restart all four
-    python3 ~/.config/conky/restart.py --widget sun_moon     # restart only Astrolabe
-    python3 ~/.config/conky/restart.py --widget new          # restart Weather + Astrolabe
-    python3 ~/.config/conky/restart.py --widget prayer       # restart only Prayer
-    python3 ~/.config/conky/restart.py --list                # list matching processes
-    python3 ~/.config/conky/restart.py --stop-only           # stop only this installation
+Use the wizard to change Date only:
 
-The Weather v2 command `python3 restart_new.py` still works as a **small compatibility alias** for `restart.py --widget new`; the implementation is centralized in `restart.py`. After migration, the old `start_astrolabe.sh` and `conky_sun_moon_astrolabe.conf` are not needed. The canonical `conky_sun_moon.conf` **always** loads the latest transparent Astrolabe.
+```bash
+python3 ~/.config/conky/configure.py --widget date
+python3 ~/.config/conky/restart.py --widget date
+```
 
-For live Conky errors in a terminal, run a single widget in the foreground:
+The standalone Weather widget does **not** need a restart after a Date mode change.
 
-    conky -c ~/.config/conky/conky_sun_moon.conf
+## 3. Weather icon mapping (expanded icon pack)
 
-Press Ctrl+C to stop a foreground instance.
+Both the standalone Weather widget and Date's main temperature use the same
+Open-Meteo **current** `weather_code` and `is_day` fields. They select the same
+condition icon without changing either widget's visibility or placement. Weather
+icons are loaded from `assets/weather/NAME.png` and are 256×256 transparent PNGs.
 
-## 5. Data sources, offline behavior and troubleshooting
+| Open-Meteo WMO condition codes | Daytime PNG | Nighttime PNG |
+| --- | --- | --- |
+| `0` clear | `32.png` | `31.png` |
+| `1` mainly clear | `34.png` | `33.png` |
+| `2` partly cloudy | `30.png` | `29.png` |
+| `3` overcast | `26.png` | `26.png` |
+| `45`, `48` fog | `20.png` | `20.png` |
+| `51`, `53` drizzle | `9.png` | `45.png` |
+| `55` dense drizzle | `6.png` | `45.png` |
+| `56`, `57` freezing drizzle | `5.png` | `5.png` |
+| `61` slight rain | `9.png` | `45.png` |
+| `63`, `65` moderate/heavy rain | `6.png` | `45.png` |
+| `66`, `67` freezing rain | `5.png` | `5.png` |
+| `71` slight snow | `13.png` | `13.png` |
+| `73`, `75` moderate/heavy snow | `14.png` | `14.png` |
+| `77` snow grains | `17.png` | `17.png` |
+| `80` slight rain showers | `9.png` | `45.png` |
+| `81`, `82` heavier rain showers | `6.png` | `45.png` |
+| `85` slight snow showers | `41.png` | `46.png` |
+| `86` heavy snow showers | `14.png` | `46.png` |
+| `95`, `97` thunderstorm / heavy thunderstorm | `37.png` | `47.png` |
+| `96`, `99` hail thunderstorm | `0.png` | `0.png` |
+| Other/unknown code | `26.png` | `26.png` |
 
-**Prayer + Hijri:** `prayer_fetch.py` and `Prayer_Data.lua` use the Aladhan API and local cache. The Hijri rollover is at Maghrib. Prayer hover, countdown, Athan behavior, and fallback rules are unchanged from `Archive.zip`. For detailed hover-zone settings see `HOVER_ZONE.md`. Athan audio (`athan.wav`) is **not included**; if you have a personal file, place it beside the other scripts and enable `athan_enabled = yes`. `paplay` is used for playback.
+The icon set depicts **freezing precipitation approximately** with `5.png` (mixed
+rain/snow); similarly `17.png` depicts small icy pellets for snow grains. The
+available art does not provide an exact pictogram for every WMO subtype.
+Although the supplied archive has 49 PNG filenames, 22 files are exact copies of
+another file. The code uses 20 distinct images. Wind icons (`23.png`–`25.png`)
+and the hot sun (`36.png`) are not automatically selected, because the present
+weather fetcher reads no wind speed and there is no configured heat threshold.
 
-**Weather:** `weather_fetch.py` uses Open-Meteo (no API key for the documented noncommercial personal endpoint), updating an atomic cache in `~/.cache/conky-sun-weather/`. The standalone widget shows temperature, high, low, humidity, and the bundled WeatherDesk-style icon (and displays a loading message until weather data is fetched). When `clock_weather_combined = yes`, the header shows `--°` until weather data is fetched. The v2 fix for weather forecast timezone/day matching is preserved.
+See Section 1 for the replacement files and restart commands.
 
-**Astrolabe:** Uses the same shared weather data cache and prayer cache for sunrise/sunset, with prayer Sunrise/Maghrib taking precedence when available. The central cratered moon shows the current *lunar phase* via local astronomical approximation. The blue nighttime orbit indicator shows **night progress**, not Moon altitude. The solar-noon mark, watch ticks, sunrise/sunset labels, day/night lengths, and 24-hour gradient timeline are shown without a card background. If a valid sun schedule isn't available, the moon can still render while sunrise/sunset telemetry waits.
+## 4. Installing the complete project
 
-Diagnostics:
+From a **complete project folder** containing all code, configuration and `assets/weather/`:
 
-    python3 ~/.config/conky/configure.py --check
-    python3 ~/.config/conky/configure.py --check-layout --widget all
-    python3 ~/.config/conky/doctor.py
-    python3 ~/.config/conky/doctor.py --fetch         # optional live prayer data request
-    python3 ~/.config/conky/doctor.py --weather-fetch # optional live weather request
-    # Inspect fetch error logs:
-    tail -n 40 ~/.cache/conky-prayer-times/fetch.log
-    tail -n 40 ~/.cache/conky-sun-weather/fetch.log
+```bash
+bash install.sh
+```
 
-**If a widget is missing:** confirm the Conky build has Lua/Cairo support (`conky --version`); check the font installation, the placement coordinates, the process list (`restart.py --list`) and the fetch log. Conky's Lua settings are loaded at startup; restart after changing location/scale/font/placement or toggling `clock_weather_combined`. The weather cache refreshes without restarting the window.
+The installer backs up any existing `~/.config/conky` directory, then installs **this project's `settings.ini` as-is**, without migrating prior setting formats. It can also install an XDG/KDE autostart entry. Options: `--no-autostart` and `--no-configure`. The optional `athan.wav` is not bundled; supply your own file next to the project scripts if desired. Font default is `ITC Avant Garde Pro XLt`; choose an installed font if needed (`fc-match`).
 
-## 6. Canonical project organization
+System requirements: Python 3, Conky with Lua/Cairo and mouse-event support for hover effects, and internet access for prayer/weather fetches. Python third-party packages are not required. `paplay` is optional for Athan playback.
 
-    Conky_Unified_Four_Widgets/
-    ├── README.md, HOVER_ZONE.md
-    ├── settings.ini                         # one shared editable configuration
-    ├── install.sh, start.sh, restart.py     # installer / launcher / safe restart
-    ├── restart_new.py                       # tiny compatibility alias only
-    ├── configure.py, layout.py             # four-widget setup and monitor wizard
-    ├── upgrade_settings.py, doctor.py      # migration and diagnostics
-    ├── Settings.lua, Surface.lua           # shared Conky helpers
-    ├── Prayer_Data.lua, prayer_fetch.py     # Aladhan prayer data/cache
-    ├── Weather_Data.lua, weather_fetch.py   # shared Open-Meteo weather/sun cache
-    ├── Hover_State.lua                      # shared hover tracking (Prayer + combined Weather)
-    ├── Prayer_Times.lua, conky_prayer_times.conf
-    ├── Hijri_Date.lua, conky_date.conf
-    ├── Weather.lua, conky_weather.conf
-    ├── Sun_Moon_Astrolabe.lua, conky_sun_moon.conf
-    └── assets/weather/*.png                 # icon assets required by Weather v2
+## 5. Configure, position and launch
 
-The obsolete Moon v2 `Sun_Moon.lua`, eight `assets/moon/` PNGs, alternate Astrolabe launcher/config, and redundant version-specific README files are intentionally excluded. **Only the four current widget implementations are packaged.** Original baseline prayer/Hijri/Weather v2 behavior remains intact whenever `clock_weather_combined = no`.
+```bash
+# Review / validate config
+python3 ~/.config/conky/configure.py --show
+python3 ~/.config/conky/configure.py --check
+
+# Configure just one widget (or all / shared location + font)
+python3 ~/.config/conky/configure.py --widget date
+python3 ~/.config/conky/configure.py --widget weather
+python3 ~/.config/conky/configure.py --widget all
+python3 ~/.config/conky/configure.py --widget shared
+
+# Monitor-aware placement and validation
+python3 ~/.config/conky/configure.py --screens
+python3 ~/.config/conky/configure.py --layout --widget all
+python3 ~/.config/conky/configure.py --check-layout --widget all
+python3 ~/.config/conky/configure.py --manual-screens
+
+# Optional layout presets
+python3 ~/.config/conky/configure.py --save-layout desktop --widget all
+python3 ~/.config/conky/configure.py --list-layouts
+python3 ~/.config/conky/configure.py --use-layout desktop --widget all
+
+# Start all, or just one (does not stop existing instances)
+bash ~/.config/conky/start.sh
+bash ~/.config/conky/start.sh --widget weather
+bash ~/.config/conky/start.sh --widget date
+
+# Stop/restart only this project's matching Conky processes
+python3 ~/.config/conky/restart.py
+python3 ~/.config/conky/restart.py --widget date
+python3 ~/.config/conky/restart.py --widget weather
+python3 ~/.config/conky/restart.py --list
+python3 ~/.config/conky/restart.py --stop-only
+```
+
+Supported widget selectors throughout: `all`, `prayer`, `date`, `weather`, and `sun_moon`. The configuration wizard also accepts `shared` for the common location/font settings. There are no alternative selectors or historical command aliases.
+
+The layout assistant works with multiple monitors via KScreen or XRandR, or manual coordinates. Conky window placement under Wayland/XWayland can differ from the compositor's desktop geometry, so visually verify the computed positions. Layout presets are stored in `layouts/`; manual monitor geometry is stored in `monitor_geometry.json`.
+
+## 6. Data and behavior
+
+- **Prayer + Hijri:** `prayer_fetch.py` uses Aladhan to populate the cache consumed by `Prayer_Data.lua`. The Hijri date rolls at Maghrib. Prayer countdown and hover zones are configured with `elapsed_minutes`, `hover_area`, `hover_failsafe_seconds`, `hover_debug_outline`, `hijri_offset_days`, and `athan_enabled`; see `HOVER_ZONE.md`. Prayer time interpretation expects your system timezone to match the configured location.
+- **Weather:** `weather_fetch.py` uses Open-Meteo without an API key for noncommercial personal use, caching current conditions, sunrise/sunset and tomorrow-through-day-three daily forecast data in `~/.cache/conky-sun-weather/`. Weather remains independent of Date; enabling `date_and_weather` adds a *second* current-weather display and its three-day hover forecast inside Date without suppressing standalone Weather. Unavailable forecast data is omitted instead of showing invented or outdated rows.
+- **Astrolabe:** draws a transparent Sun/Moon dial with lunar phase, night progress and solar schedule from shared caches. The Astrolabe has no background card; icons for standalone Weather and Date weather are loaded from `assets/weather/`.
+
+Diagnose problems with:
+
+```bash
+python3 ~/.config/conky/doctor.py
+python3 ~/.config/conky/doctor.py --fetch
+python3 ~/.config/conky/doctor.py --weather-fetch
+conky -c ~/.config/conky/conky_date.conf
+# Press Ctrl+C to close this foreground diagnostic instance
+```
+
+If a widget is missing, check `restart.py --list`, screen placement, Conky Cairo/Lua support (`conky --version`), font installation, weather icon assets, and cache logs: `~/.cache/conky-prayer-times/fetch.log` and `~/.cache/conky-sun-weather/fetch.log`. Restart a widget after modifying its configuration; shared cache updates do not require a restart.
+
+## 7. Project files
+
+```text
+README.md, HOVER_ZONE.md
+settings.ini
+install.sh, start.sh, restart.py
+configure.py, layout.py, doctor.py
+Settings.lua, Surface.lua, Hover_State.lua
+Prayer_Data.lua, prayer_fetch.py
+Weather_Data.lua, weather_fetch.py
+Prayer_Times.lua, conky_prayer_times.conf
+Hijri_Date.lua, conky_date.conf
+Weather.lua, conky_weather.conf
+Sun_Moon_Astrolabe.lua, conky_sun_moon.conf
+assets/weather/*.png
+```
+
+The project uses a single current configuration schema, without migration scripts, compatibility settings, or launcher aliases. This icon patch does not change the configuration schema.

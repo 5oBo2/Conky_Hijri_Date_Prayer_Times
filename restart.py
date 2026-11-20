@@ -13,14 +13,10 @@ CONFIGS = {
     'prayer': {'conky_prayer_times.conf'},
     'date': {'conky_date.conf'},
     'weather': {'conky_weather.conf'},
-    # Include the old alternative name when stopping so migration does not
-    # leave an overlapping legacy Astrolabe running.
-    'sun_moon': {'conky_sun_moon.conf', 'conky_sun_moon_astrolabe.conf'},
+    'sun_moon': {'conky_sun_moon.conf'},
 }
 GROUPS = {
     'all': tuple(CONFIGS),
-    'both': ('prayer', 'date'),
-    'new': ('weather', 'sun_moon'),
 }
 
 

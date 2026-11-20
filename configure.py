@@ -51,8 +51,8 @@ def validate(cp):
         raise ValueError("elapsed_minutes must be nonnegative")
     if cp.getint("behavior", "hover_failsafe_seconds", fallback=5) < 0:
         raise ValueError("hover_failsafe_seconds must be nonnegative")
-    if cp.getint("behavior", "weather_hover_failsafe_seconds", fallback=4) < 0:
-        raise ValueError("weather_hover_failsafe_seconds must be nonnegative")
+    if cp.getint("behavior", "date_weather_hover_failsafe_seconds") < 0:
+        raise ValueError("date_weather_hover_failsafe_seconds must be nonnegative")
     if cp.get("behavior", "hover_area", fallback="content") not in (
         "content",
         "window",
@@ -72,23 +72,27 @@ def validate(cp):
             raise ValueError(f"{key} must be between -400 and 700")
     if not 40 <= cp.getfloat("appearance", "weather_icon_size", fallback=137) <= 400:
         raise ValueError("weather_icon_size must be between 40 and 400")
-    cp.getboolean("appearance", "clock_weather_combined", fallback=False)
-    if not 40 <= cp.getfloat("appearance", "combined_clock_size", fallback=145) <= 300:
-        raise ValueError("combined_clock_size must be between 40 and 300")
+    date_mode = cp.get("appearance", "date_weather_mode")
+    if date_mode not in ("date_only", "date_and_weather"):
+        raise ValueError(
+            "date_weather_mode must be date_only or date_and_weather"
+        )
+    if not 40 <= cp.getfloat("appearance", "date_weather_clock_size") <= 300:
+        raise ValueError("date_weather_clock_size must be between 40 and 300")
     if (
         not 20
-        <= cp.getfloat("appearance", "combined_hover_temp_size", fallback=82)
+        <= cp.getfloat("appearance", "date_weather_hover_temp_size")
         <= 250
     ):
-        raise ValueError("combined_hover_temp_size must be between 20 and 250")
+        raise ValueError("date_weather_hover_temp_size must be between 20 and 250")
     if (
         not 20
-        <= cp.getfloat("appearance", "combined_weather_icon_size", fallback=72)
+        <= cp.getfloat("appearance", "date_weather_icon_size")
         <= 250
     ):
-        raise ValueError("combined_weather_icon_size must be between 20 and 250")
-    for key in ("combined_weather_icon_dx", "combined_weather_icon_dy"):
-        value = cp.getfloat("appearance", key, fallback=0)
+        raise ValueError("date_weather_icon_size must be between 20 and 250")
+    for key in ("date_weather_icon_dx", "date_weather_icon_dy"):
+        value = cp.getfloat("appearance", key)
         if not -300 <= value <= 300:
             raise ValueError(f"{key} must be between -300 and 300")
     if not cp.get("appearance", "font").strip():
@@ -144,8 +148,6 @@ def main():
             "date",
             "weather",
             "sun_moon",
-            "new",
-            "both",
             "all",
             "shared",
         ),
@@ -189,9 +191,6 @@ def main():
         args.layout or args.check_layout or args.save_layout or args.use_layout
     ):
         parser.error("--widget shared is for the configuration wizard, not layouts")
-    from upgrade_settings import upgrade
-
-    upgrade()
     cp = read()
     if args.screens:
         displays, source = layout.monitors()
@@ -219,7 +218,7 @@ def main():
         validate(cp)
         save_preserving_comments(cp)
         print(
-            f"Activated layout {args.use_layout} for {args.widget or 'both'}. Restart affected Conky instances."
+            f"Activated layout {args.use_layout} for {args.widget or 'all'}. Restart affected Conky instances."
         )
         return
     if args.layout:
@@ -228,7 +227,7 @@ def main():
         validate(cp)
         save_preserving_comments(cp)
         print(
-            f"Saved monitor-aware placement for {args.widget or 'both'}. Restart affected Conky instances."
+            f"Saved monitor-aware placement for {args.widget or 'all'}. Restart affected Conky instances."
         )
         return
     if args.show:
@@ -248,27 +247,22 @@ def main():
     )
     print("you may edit settings.ini by hand at any time.\n")
     target = args.widget or prompt(
-        "Configure: prayer / date / weather / sun_moon / new / both / all / shared",
+        "Configure: prayer / date / weather / sun_moon / all / shared",
         "all",
-    )
-    target = {"1": "prayer", "2": "date", "3": "shared", "4": "both"}.get(
-        target, target
     )
     if target not in (
         "prayer",
         "date",
         "weather",
         "sun_moon",
-        "new",
         "shared",
-        "both",
         "all",
     ):
         raise ValueError(
-            "Choose prayer, date, weather, sun_moon, new, shared, both, or all"
+            "Choose prayer, date, weather, sun_moon, shared, or all"
         )
 
-    if target in ("both", "all", "shared"):
+    if target in ("all", "shared"):
         print("\nShared settings (location and font affect all four widgets)")
         current_mode = cp["location"]["mode"]
         choice = prompt(
@@ -293,7 +287,7 @@ def main():
         change(cp, "location", "midnight_mode", "Midnight convention (0 or 1)")
         change(cp, "appearance", "font", "Font (must be installed)")
 
-    if target in ("both", "all", "prayer"):
+    if target in ("all", "prayer"):
         print("\nPrayer widget only")
         change(cp, "appearance", "prayer_scale", "Prayer widget scale (1.0 = original)")
         change(
@@ -311,21 +305,56 @@ def main():
         )
         change(cp, "behavior", "athan_enabled", "Play Athan audio (yes/no)")
 
-    if target in ("both", "all", "date"):
+    if target in ("all", "date"):
         print("\nDate/Hijri widget only")
         change(
             cp, "appearance", "date_scale", "Date/clock widget scale (1.0 = original)"
         )
+        print("Standalone Weather remains a separate window in either Date mode.")
         change(
             cp,
             "appearance",
-            "clock_weather_combined",
-            "Combine Clock | Weather inside Date widget (yes/no)",
+            "date_weather_mode",
+            "Date mode (date_only / date_and_weather)",
         )
+        if cp["appearance"]["date_weather_mode"] == "date_and_weather":
+            # These settings adjust the weather section inside the Date window,
+            # never the separate Weather widget's size, position, or visibility.
+            change(cp, "appearance", "date_weather_clock_size", "Date weather clock size")
+            change(
+                cp,
+                "appearance",
+                "date_weather_hover_temp_size",
+                "Date weather hover temperature size",
+            )
+            change(
+                cp,
+                "appearance",
+                "date_weather_icon_size",
+                "Date weather icon size",
+            )
+            change(
+                cp,
+                "appearance",
+                "date_weather_icon_dx",
+                "Date weather icon horizontal nudge",
+            )
+            change(
+                cp,
+                "appearance",
+                "date_weather_icon_dy",
+                "Date weather icon vertical nudge",
+            )
+            change(
+                cp,
+                "behavior",
+                "date_weather_hover_failsafe_seconds",
+                "Date weather hover failsafe (seconds)",
+            )
         change(cp, "behavior", "hijri_offset_days", "Hijri date offset (days)")
 
-    if target in ("new", "all", "weather"):
-        print("\nWeather widget")
+    if target in ("all", "weather"):
+        print("\nStandalone Weather widget (independent of Date mode)")
         change(cp, "appearance", "weather_scale", "Weather scale (1.0 = original)")
         change(
             cp,
@@ -346,34 +375,10 @@ def main():
             "Weather icon size in pixels (before widget scale)",
         )
         change(
-            cp,
-            "appearance",
-            "combined_weather_icon_size",
-            "Combined mode weather icon size",
-        )
-        change(
-            cp,
-            "appearance",
-            "combined_weather_icon_dx",
-            "Combined mode icon horizontal nudge",
-        )
-        change(
-            cp,
-            "appearance",
-            "combined_weather_icon_dy",
-            "Combined mode icon vertical nudge",
-        )
-        change(
-            cp,
-            "behavior",
-            "weather_hover_failsafe_seconds",
-            "Combined weather hover failsafe (seconds)",
-        )
-        change(
             cp, "behavior", "weather_refresh_minutes", "Weather refresh (5..180 min)"
         )
 
-    if target in ("new", "all", "sun_moon"):
+    if target in ("all", "sun_moon"):
         print("\nCelestial Astrolabe (transparent Sun / Moon)")
         change(
             cp, "appearance", "sun_moon_scale", "Astrolabe scale (1.0 = design size)"
@@ -389,11 +394,7 @@ def main():
                 print("Positioning cancelled; retaining previous X/Y settings.")
         elif placement_method == "manual":
             for kind in ("prayer", "date", "weather", "sun_moon"):
-                if target == "both" and kind not in ("prayer", "date"):
-                    continue
-                if target == "new" and kind not in ("weather", "sun_moon"):
-                    continue
-                if target not in ("both", "new", "all", kind):
+                if target not in ("all", kind):
                     continue
                 for coordinate in ("x", "y"):
                     change(

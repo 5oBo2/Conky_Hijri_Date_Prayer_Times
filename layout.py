@@ -14,12 +14,17 @@ import re
 import subprocess
 
 BASE = {'prayer': (1100, 255), 'date': (700, 290),
-        'weather': (282, 155), 'sun_moon': (416, 432)}
+        'weather': (340, 172), 'sun_moon': (416, 432)}
+
+WIDGETS = ('prayer', 'date', 'weather', 'sun_moon')
+
 
 def kinds_for(widget):
-    return {'both': ('prayer', 'date'),
-            'new': ('weather', 'sun_moon'),
-            'all': ('prayer', 'date', 'weather', 'sun_moon')}.get(widget, (widget,))
+    if widget == 'all':
+        return WIDGETS
+    if widget not in WIDGETS:
+        raise ValueError(f'Unknown widget: {widget}')
+    return (widget,)
 ANCHORS = (
     'top-left', 'top-center', 'top-right',
     'middle-left', 'center', 'middle-right',
@@ -199,7 +204,7 @@ def calculate_position(monitor, kind, scale, anchor, margin_x, margin_y):
     return x, y
 
 
-def get_boxes(cp, widget='both'):
+def get_boxes(cp, widget='all'):
     for kind in kinds_for(widget):
         scale = cp.getfloat('appearance', kind + '_scale')
         w, h = scaled_size(kind, scale)
@@ -225,7 +230,7 @@ def show_screens(displays, source):
         print(f"  {i}. {m['name']}: {m['w']}x{m['h']} at ({m['x']},{m['y']})")
 
 
-def check_layout(cp, widget='both'):
+def check_layout(cp, widget='all'):
     displays, source = monitors()
     show_screens(displays, source)
     print('\nEstimated Conky rectangles (X,Y,W,H):')
@@ -274,7 +279,7 @@ def ask_option(prompt, choices, default):
         print('Choose one of: ' + ', '.join(choices))
 
 
-def wizard(cp, widget='both'):
+def wizard(cp, widget='all'):
     displays, source = monitors()
     show_screens(displays, source)
     if not displays:
@@ -338,7 +343,7 @@ def _selected_layout_keys(widget):
             ('placement', [kind + '_' + axis for kind in kinds for axis in ('x', 'y')]))
 
 
-def save_layout(cp, name, widget='both'):
+def save_layout(cp, name, widget='all'):
     """Store selected widget layout; when updating a preset keep the other widget."""
     path = _profile_path(name)
     LAYOUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -356,7 +361,7 @@ def save_layout(cp, name, widget='both'):
     return path
 
 
-def use_layout(cp, name, widget='both'):
+def use_layout(cp, name, widget='all'):
     path = _profile_path(name)
     if not path.is_file():
         raise ValueError(f'Layout not found: {name}. Saved layouts: {", ".join(list_layouts()) or "none"}')
