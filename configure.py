@@ -99,12 +99,6 @@ def validate(cp):
         raise ValueError("hover_failsafe_seconds must be nonnegative")
     if cp.getint("behavior", "date_weather_hover_failsafe_seconds") < 0:
         raise ValueError("date_weather_hover_failsafe_seconds must be nonnegative")
-    if cp.get("behavior", "hover_area", fallback="content") not in (
-        "content",
-        "window",
-        "fajr_sunrise",
-    ):
-        raise ValueError("hover_area must be content, window or fajr_sunrise")
     cp.getboolean("behavior", "hover_debug_outline", fallback=False)
     cp.getint("behavior", "hijri_offset_days")
     cp.getboolean("behavior", "athan_enabled")
@@ -414,7 +408,6 @@ def main():
         change(
             cp, "behavior", "elapsed_minutes", "Auto-show elapsed minutes after Athan"
         )
-        change(cp, "behavior", "hover_area", "Hover area (fajr_sunrise/content/window)")
         change(
             cp,
             "behavior",

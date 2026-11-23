@@ -39,7 +39,7 @@ Task 1 (Repo Organization)
 
 ## Task Checklist
 
-### [ ] Task 1: Reorganize Repository Directory Structure — Implemented, Desktop Verification Pending
+### [ ] Task 1: Reorganize Repository Directory Structure — Implemented; Live Rendering Confirmed, Extended CLI Checks Open
 **Goal:** Move files out of the single flat root directory into a clean, maintainable layout while keeping user-facing CLI entrypoints simple.
 
 **Target Layout (adapt only if an existing script/autostart requires an adjustment—document any deviation):**
@@ -63,13 +63,13 @@ Task 1 (Repo Organization)
 - [x] `python3 configure.py --check` passes.
 - [ ] `python3 doctor.py` passes with 0 errors on the actual desktop (0 errors in an isolated fixture with a stub Conky and a temporary icon).
 - [ ] `python3 restart.py --list` and `python3 restart.py` find, stop, and restart all 4 `configs/conky_*.conf` instances cleanly on the actual desktop (simulated four-process cycle passed).
-- [ ] All 4 widgets render normally with fonts, weather PNG icons, prayer data, and weather data loaded (actual desktop test pending).
+- [x] All 4 widgets render normally with fonts, weather PNG icons, prayer data, and weather data loaded (user confirmed restored functionality on 2026-11-23).
 - [x] Findings & Handoff Log updated.
 
 ---
 
-### [ ] Task 2: Upgrade `lib/Hover_State.lua` for Named Multi-Zone Support — Implemented, Desktop Verification Pending
-**Goal:** Allow a single Conky window to define and query multiple independent hover zones (e.g., `'weather'` vs `'hijri'`, or `'fajr_sunrise'` vs individual prayer columns) without them triggering each other.
+### [ ] Task 2: Upgrade `lib/Hover_State.lua` for Named Multi-Zone Support — Implemented; User-Reported Functional, Alternate-Zone Checks Open
+**Goal:** Allow a single Conky window to define and query multiple independent hover zones (e.g., `'weather'` vs `'hijri'`, or `'elapsed_above_fajr'` vs individual prayer columns) without them triggering each other.
 
 **Implementation Notes:**
 - Use one `Hover.new(timeout)` state with **named zones only** (no legacy single-zone state or parallel API):
@@ -77,18 +77,18 @@ Task 1 (Repo Organization)
   - `state:visible(name, now)` queries the named zone only.
   - On `mouse_enter` / `mouse_move`, activate only named zones containing `(event.x, event.y)` and immediately clear non-matching zones. Missing coordinates cannot identify a zone and leave hover hidden.
   - On `mouse_leave` or the Wayland failsafe timeout, clear active zones. Geometry updates must not reset active hover.
-- Use the same API in **both** `widgets/Hijri_Date.lua` (`weather`) and `widgets/Prayer_Times.lua` (`fajr_sunrise`). The Prayer `hover_area` choice (`fajr_sunrise`, `content`, `window`) changes only the zone's rectangle(s), not the hover implementation. Preserve the visible behavior (Date 3-day forecast and Prayer elapsed timer).
+- Use the same API in **both** `widgets/Hijri_Date.lua` (`weather`) and `widgets/Prayer_Times.lua` (`elapsed_above_fajr`). Elapsed-time activation is a single, disjoint hotspot above Fajr. Do not reintroduce broad `content`/`window` modes overlapping Task 6 prayer columns. Preserve Date 3-day forecast and the Prayer elapsed timer.
 - **Config evaluation:** No new `settings.ini` keys needed.
 
 **Acceptance & Verification:**
-- [ ] Existing `Hijri_Date.lua` right-side weather hover still opens/closes as before.
-- [ ] Existing `Prayer_Times.lua` `fajr_sunrise` hover (and `hover_area` modes `fajr_sunrise` / `content` / `window`) still behaves identically.
+- [x] Existing `Hijri_Date.lua` right-side weather hover still opens/closes as before (user reported no missing functionality after restoration; not independently re-probed).
+- [ ] Live KDE: elapsed countdown appears **only** above Fajr (outside the automatic `elapsed_minutes` interval), never over the row's seven prayer headings/times; stationary hover is steady with failsafe zero.
 - [x] Unit/smoke test in Lua confirms two named zones in one `Hover` instance trigger independently and expire on `mouse_leave` and timeout (`texlua tests/test_hover_state.lua`).
 - [x] Findings & Handoff Log updated.
 
 ---
 
-### [ ] Task 3: Deduplicate Weather Icon Mapping & Drawing (`lib/Weather_Icons.lua`) — Implemented, Desktop Verification Pending
+### [x] Task 3: Deduplicate Weather Icon Mapping & Drawing (`lib/Weather_Icons.lua`) — Implemented and Live Functionality Confirmed
 **Goal:** Eliminate the duplicate `icon_code(wmo, day)` mapping and PNG surface cache currently copy-pasted across `Weather.lua` and `Hijri_Date.lua`.
 
 **Implementation Notes:**
@@ -99,13 +99,13 @@ Task 1 (Repo Organization)
 - **Config evaluation:** No new `settings.ini` keys needed.
 
 **Acceptance & Verification:**
-- [ ] `Weather.lua` and `Hijri_Date.lua` render identical weather icons (current conditions + 3-day hover forecast) with no missing PNGs.
+- [x] `Weather.lua` and `Hijri_Date.lua` render with their current/forecast icons and no missing functionality reported on 2026-11-23; exact icon identity remains covered by offline WMO mapping tests.
 - [x] Only one WMO-to-PNG mapping exists in `lib/Weather_Icons.lua` (no widget-local `icon_code` functions).
 - [x] Findings & Handoff Log updated.
 
 ---
 
-### [ ] Task 4: Aladhan `Lastthird` Caching & Click Toggle on Midnight Column — Implemented, Desktop Verification Pending
+### [ ] Task 4: Aladhan `Lastthird` Caching & Click Toggle on Midnight Column — Implemented; Live Click Confirmed, Live Fetch Check Open
 **Goal:** Fetch `Lastthird` directly from the Aladhan API (not calculated manually) and allow left-clicking the Midnight column in `Prayer_Times.lua` to toggle that column between `Midnight` and `Last 3rd`, while keeping the post-Isha `Till Midnight` countdown unaffected.
 
 **Critical Pre-Check (Do First!):**
@@ -126,36 +126,30 @@ Task 1 (Repo Organization)
 
 **Acceptance & Verification:**
 - [ ] `python3 doctor.py --fetch` populates `Lastthird=` in `~/.cache/conky-prayer-times/<today>.cache` with header `CONKY_PRAYER_V2`.
-- [ ] Clicking the 7th column toggles between `Midnight` (`times.Midnight`) and `Last 3rd` (`times.Lastthird`).
+- [x] Clicking the 7th column toggles between `Midnight` (`times.Midnight`) and `Last 3rd` (`times.Lastthird`). User confirmed live switching and responsiveness after locally setting `update_interval = 0.25` (2026-11-23).
 - [x] Between Isha and Midnight, toggling the 7th column to `Last 3rd` does **not** alter `Till Midnight` in the countdown row (passed simulated real widget draw path; desktop rendering still unverified).
 - [x] Findings & Handoff Log updated (including Conky `button_down` behavior notes).
 
 ---
 
-### [ ] Task 5: Next-Prayer Subtle Row Highlight & Dynamic `Jumu'ah` Naming
-**Goal:** Make the upcoming prayer stand out gently in the 7-column row, and display `Jumu'ah` instead of `Dhuhr` whenever the displayed/next Dhuhr is Friday's Jumu'ah prayer.
+### [x] Task 5: Next-Prayer Sideline Accent & Maghrib-Based `Jumu'ah` Naming — Implemented; User-Verified Styling, Maghrib Live Transition Still To Observe
+**Goal:** Make the upcoming canonical prayer visible without brightening or changing its clock time, and label the displayed Islamic day's Dhuhr correctly across the Maghrib boundary.
 
-**Implementation Notes:**
-1. **Subtle Brightness Highlight:**
-   - In `widgets/Prayer_Times.lua`, use a brighter color (`alpha = 1.0`, e.g., `{1, 1, 1, 1}`) for the column matching `upcoming.name` (both header and time), and slightly softer white (e.g., `{1, 1, 1, 165/255}` or `{1, 1, 1, 180/255}`) for the other columns so the contrast is clear yet minimal and refined.
-   - Check edge case: if `upcoming` is tomorrow's `Fajr` (after Isha), the `Fajr` column highlights. If `upcoming` is `Dhuhr`/`Jumu'ah`, match the 3rd column cleanly.
-2. **Dynamic `Jumu'ah` Naming:**
-   - Helper `prayer_display_name(name, ts)`: if `name == 'Dhuhr'` and `os.date('*t', ts).wday == 6` (Friday in Lua: `1=Sun .. 6=Fri`), return `"Jumu'ah"`.
-   - **Font Glyph Check:** Verify `ITC Avant Garde Pro XLt` renders `"Jumu'ah"` (ASCII `'`) cleanly with no missing-glyph box. (Do NOT use `ʿ` U+02BF unless verified in the font!)
-   - Apply this naming to:
-     - The main 7-column row on Fridays (`os.date('*t', now).wday == 6`).
-     - `Till Jumu'ah` countdown when the upcoming prayer is Friday's Dhuhr (even if viewed on Thursday after Dhuhr? Note: if `upcoming` is Thursday's Dhuhr, it says `Till Dhuhr`; once Thursday's Dhuhr passes and the *next* Dhuhr is Friday's, or on Friday itself, `Till Jumu'ah` / `Since Jumu'ah` applies).
-     - Check horizontal spacing so `"Jumu'ah"` does not collide with `"Asr"` at `prayer_scale` values.
-- **Config evaluation:** Skip config—this is automatic visual polish and calendar logic.
+**Implementation (revised after live user feedback, 2026-11-23):**
+1. **Option 03 from the user-supplied HTML (`isha-highlight-variations.html`):** A single 3px-at-scale vertical sideline, plus the next-prayer **name** in warm gold `#efb46f`. No box, glow, animation, other-color change, or brightness contrast in times. Restore original `WHITE` alpha 200/255 for every row time and all other names. Only canonical next-prayer events get the accent, including tomorrow's Fajr; not Sunrise or Midnight / Last 3rd.
+2. **Configurable accent:** `appearance.next_prayer_color = #RRGGBB` in `settings.ini` (optional, default `#efb46f`). One setting controls both stroke and next-prayer label. Validate hex values with a clear error. Do not modify users' active `settings.ini` in a patch.
+3. **Islamic day at Maghrib:** The row's Dhuhr/Jumu'ah identity changes at the **local Maghrib timestamp**. At Thursday Maghrib the third column becomes `Jumu'ah` using **Friday's actual cached Dhuhr time**; at Friday Maghrib it becomes Saturday's `Dhuhr` and time. Keep other row columns on the current civil day's schedule, so Thursday Isha continues to be Thursday Isha. Show `--:--` until next-day cache is ready; never mislabel Thursday Dhuhr time as Friday Jumu'ah.
+4. **Real event countdowns:** Keep canonical `Dhuhr` event names for sorting, athan, columns, and timestamps. For `Till`/`Since` countdowns only, use `Jumu'ah` when the Dhuhr event occurs on civil Friday. This is independent of the row's label once the Islamic night begins.
+5. **Font and geometry:** Use ASCII `Jumu'ah` for the selected font; reserve measured heading widths and ensure the scale-adjusted left stroke stays inside the widget bounds at supported scales.
 
 **Acceptance & Verification:**
-- [ ] Upcoming prayer column is visibly brighter than the other 6 columns without harsh boxes or color clashes.
-- [ ] Simulate Friday (`wday == 6`) and confirm main row + `Till Jumu'ah` + `Since Jumu'ah` render `"Jumu'ah"` cleanly with no overlap or tofu glyphs.
-- [ ] Findings & Handoff Log updated.
+- [x] On live KDE, user confirmed the sideline highlight and Jumu'ah update are working (2026-11-23); the previous brightness-only highlight was removed. Not a separate measured check at every scale.
+- [x] Offline regression: at exact Thursday Maghrib Jumu'ah begins, at exact Friday Maghrib it ends, next-day Dhuhr time is used, countdowns still use Friday event timestamps, and the next Fajr/other prayer gets the sideline.
+- [x] Offline regression: hex setting defaults to `#efb46f`, accepts a custom value, and rejects invalid colors; line positioning fits 0.65, 1.0 and 1.5 scales.
+- [ ] On live KDE, verify Thursday and Friday Maghrib transitions with actual Aladhan caches, 7-column spacing, and the `ITC Avant Garde Pro XLt` glyphs. The logic is tested offline but the real transition has not yet been observed.
+- [x] Findings & Handoff Log updated. User accepted Task 5 and requested moving to Task 6 (2026-11-23). The rare live Thursday/Friday Maghrib boundary remains a separately tracked verification item, not a blocker for Task 6.
 
----
-
-### [ ] Task 6: Prayer Widget Second Hover Zone (Hover Any Prayer for Its Countdown)
+### [ ] Task 6: Prayer Widget Second Hover Zone (Hover Any Prayer for Its Countdown) — Hover Countdowns Working; Elapsed Hotspot Fix Awaits Live Verification
 **Goal:** Hovering over any prayer column in the main 7-column row temporarily displays `Till <HoveredPrayer>` in the countdown area without disturbing the primary `Till <NextPrayer>` (or post-Fajr/post-Isha secondary timers).
 
 **Behavioral Specification:**
@@ -171,12 +165,19 @@ Task 1 (Repo Organization)
 - Check `configs/conky_prayer_times.conf` (`minimum_width = 1100 * scale`) to verify Column 3 (`x0 + 2 * stride`) never clips horizontally.
 - **Config evaluation:** Uses existing `hover_failsafe_seconds` (or check if prayer hover needs anything separate—avoid duplicate keys unless needed).
 
+**Implementation (2026-11-23):**
+- `widgets/Prayer_Times.lua` registers seven independent, scale-aware `prayer_column_<1..7>` zones using measured row geometry. They coexist with the disjoint `elapsed_above_fajr` hotspot and clickable `midnight_column`; no separate hover API or new settings keys.
+- The selected column is resolved to the next actual timestamp `>= now` from yesterday/today/tomorrow's cached schedules. Midnight and Lastthird are assigned their correct post-midnight **civil date**, including a pending event from yesterday's schedule. Hovering the seventh column respects the existing `Midnight` / `Last 3rd` toggle; Friday Dhuhr countdowns show `Jumu'ah` based on the event timestamp.
+- The existing upcoming countdown stays in countdown Column 1. When there is no Sunrise/Midnight extra, the hovered countdown uses Column 2; when extra is present, it uses Column 3. Hovering the upcoming event or the already-visible extra does not duplicate it. Leaving the window or reaching the existing `hover_failsafe_seconds` removes the temporary countdown; a stationary pointer may time out by design.
+- `test_prayer_hover.lua` executes real drawing and mouse hooks with stubbed Cairo, checking seven disjoint hitboxes at 0.65/1/1.5 scales, countdown placements, no duplicates, Friday Jumu'ah, post-midnight Lastthird, toggle behavior, cache misses, the separate elapsed-time hotspot, and timeout. No current runtime config, positioning, surface, or autostart changes.
+
 **Acceptance & Verification:**
-- [ ] Hovering `Isha` while `Asr` is next displays `Till Asr` (Col 1) and `Till Isha` (Col 2).
-- [ ] Hovering `Dhuhr` after `Isha` (before `Midnight`) displays `Till Fajr` (Col 1), `Till Midnight` (Col 2), and `Till Dhuhr` (Col 3).
-- [ ] Hovering the already-next prayer shows nothing extra.
-- [ ] Hovering `fajr_sunrise` zone (above Fajr/Sunrise) still shows `Since <previous>` independently.
-- [ ] Findings & Handoff Log updated.
+- [x] Offline: hovering `Isha` while `Asr` is next displays `Till Asr` (Col 1) and `Till Isha` (Col 2).
+- [x] Offline: hovering `Dhuhr` after `Isha` (before `Midnight`) displays `Till Fajr` (Col 1), `Till Midnight` (Col 2), and `Till Dhuhr` (Col 3) when the next Dhuhr is Sunday; on Thursday night it correctly says `Till Jumu'ah` for Friday.
+- [x] Offline: hovering an already-visible upcoming or Sunrise/Midnight extra event produces no duplicate countdown; seventh-column hover follows Last 3rd toggle and rollover.
+- [x] Offline: `elapsed_above_fajr` shows `Since <previous>` only from the full-column-sized rectangle above Fajr, not on any prayer column; mouse_leave clears hover, and failsafe zero keeps stationary hover steady; countdown Column 3 fits test windows.
+- [ ] Live KDE: user confirms prayer-column countdowns and failsafe-zero persistence work, but reported elapsed countdown activating over the first two prayer columns; verify corrected Fajr-only hotspot and ensure column countdowns, countdown positions, and click-to-toggle still work.
+- [x] Findings & Handoff Log updated.
 
 ---
 
@@ -345,9 +346,21 @@ obsolete backend-specific assumptions instead of supporting parallel layouts.
 - *Offline verification:* `texlua tests/test_native_wayland.lua`, `texlua tests/test_hover_state.lua`, `texlua tests/test_weather_icons.lua`, `texlua tests/test_prayer_click.lua`, `python3 -m unittest discover -s tests -p 'test_*.py'` (7 tests), `python3 configure.py --check`, and `bash -n start.sh install.sh` all passed. The test fixture verifies the runtime gate accepts `1.24.2` and rejects `1.22.2-pre`, and verifies layout computations are output-local. Full patch application against the prior diagnostic baseline checked separately. **Real Conky 1.24.2 / KDE** layering over wallpaper, opacity, positioning, four-widget Cairo output, hover and column click still open. Do not check off Task 4 or advance to Task 5 until visible desktop testing passes.
 - *Upstream caveat:* Conky 1.24.3 release notes changed handling of Wayland `own_window_hints` and layer-shell `normal` stacking. Fedora 45's currently published 1.24.2 does not include those later changes; this patch uses `desktop` to request a native layer-shell rather than pretending `normal`+`below` will work. Test actual Plasma visibility before considering another window role.
 
-### Task 5 Log
-- *Status:* Pending
-- *Notes:* —
+### XWayland acceptance and prayer-click responsiveness (user confirmation, 2026-11-23)
+- **User's live confirmation:** All four widgets displayed correctly under the restored Fedora 45 / Conky 1.24.2 X11/XWayland setup, with no missing functionality. The Midnight/Last 3rd left-click toggle works, and reducing Prayer Times `update_interval` from 1 to **0.25** in the installed `configs/conky_prayer_times.conf` eliminated the objectionable click-to-redraw lag. This interval was changed **manually** by the user; do not include the config line in the Task 5 patch (it would conflict with the already-modified working file).
+- **Scope of confirmation:** Close the reported blank-widget Cairo regression and record the live click/regular-use check. This does **not** establish that `python3 doctor.py --fetch`, all `restart.py` modes, profile switching, simulated suspend/midnight rollover, or each alternate hover mode has been tested on desktop. The corresponding narrowly defined acceptance checkboxes remain open; do not misrepresent the historical 1.22.2 mouse-hook report as describing the current 1.24.2 behavior.
+
+### Task 5 Log (2026-11-23)
+- *Status:* Implemented and tested offline. Real KDE/Conky visual verification remains open; do not check off the Task 5 heading until the user confirms the column contrast and the Friday ASCII text in the actual selected font.
+- *Files:* `widgets/Prayer_Times.lua`, `tests/test_next_prayer.lua`, `README.md`, `ROADMAP.md`. No `settings.ini`, XWayland, Cairo surface, autostart, cache-format, or notification changes.
+- *Behavior:* The next canonical prayer (`Fajr`, `Dhuhr`, `Asr`, `Maghrib`, or `Isha`) has alpha 1.0 on **both** its main-row heading and time; all six other columns use 180/255. After Isha the next-day Fajr is highlighted, while the next-prayer and post-Isha `Till Midnight` countdown behavior remains unchanged. `prayer_display_name(name, ts)` changes only Friday-dated `Dhuhr` events to ASCII `Jumu'ah`: Friday's main-row heading, upcoming `Till Jumu'ah`, and elapsed `Since Jumu'ah`. Schedule events stay canonically named `Dhuhr` so sorting and column matching do not change. The row reserves measured width for Friday's longer heading and the alternate `Last 3rd` title. No new settings: fixed subtle styling and calendar-based naming are automatic.
+- *Verification:* `texlua tests/test_next_prayer.lua` exercises Friday before/after noon, Thursday and Saturday names, tomorrow's Fajr highlight, alpha values, countdowns, Midnight/Last 3rd interaction, and no Jumu'ah/Asr overlap at scales 0.65, 1.0, 1.5 (mock Cairo). Existing four Lua regression suites, 15 Python tests, `python3 configure.py --check`, `python3 -m compileall -q .` and `bash -n start.sh install.sh` passed offline. **Still requires visible testing** in the actual `ITC Avant Garde Pro XLt` font (glyphs, alignment and contrast) and real Friday scheduling; no live Conky available in patch environment.
+
+### Task 5 visual revision / Maghrib boundary (2026-11-23)
+- *User feedback:* Initial all-white next-column brightness was too prominent. Replace that emphasis rather than layering more styling over it. The requested reference is **variation 03 (vertical accent line)** from `isha-highlight-variations.html`: a gold line and gold **name only**, using its `#efb46f` color. The change is cosmetic; all large times keep their pre-Task-5 white alpha and no other widget is touched.
+- *Day semantics:* The row label advances with the Islamic date at **local Maghrib**. Thursday at Maghrib => Friday Jumu'ah; Friday at Maghrib => Saturday Dhuhr. The third column must use the corresponding next civil day's cached Dhuhr clock time after Maghrib. If the next-day cache is still fetching, show `--:--` rather than displaying yesterday's clock time as Jumu'ah. All other displayed columns keep today's timings; real `Till`/`Since` event labels and athan timing remain timestamp-based.
+- *Configuration:* `appearance.next_prayer_color` is optional, defaults to `#efb46f`, accepts `#RRGGBB`, and is shared by the sideline and its label. Existing `settings.ini` is intentionally not patched; see the README for how to override. Keep the user's existing `update_interval = 0.25` untouched.
+- *Verification:* The new offline test exercises exact Maghrib transitions, different Thursday/Friday Dhuhr times, absent next-day cache, default/custom/invalid colors, scaled sideline placement, unchanged white time colors, and the Midnight/Last 3rd click. This **supersedes** the original Task 5 bright-white behavior described in the historical log above. User has not yet confirmed the new style on the actual desktop; leave Task 5 unchecked until then.
 
 ### Task 6 Log
 - *Status:* Pending
@@ -408,3 +421,21 @@ obsolete backend-specific assumptions instead of supporting parallel layouts.
   closes the immediate blank-widget regression. Do not conflate this report
   with explicit testing of every hover/click path, Show Desktop, logout/login,
   hotplug, mixed-DPI or future native Wayland releases. Task 11 remains blocked.
+
+
+### Task 6 — Prayer-column countdown hover (2026-11-23; offline implemented, live validation pending)
+- **Task 5 handoff:** User confirmed the sideline style and Jumu'ah changes appear correctly and requested Task 6. Marked Task 5 feature complete; an actual Thursday/Friday Maghrib rollover still needs live observation and is not falsely claimed as tested.
+- **Design:** Added one named `prayer_column_1` through `prayer_column_7` hover zone per on-screen prayer; these share `lib/Hover_State.lua` with the existing upper elapsed-time hotspot and Midnight toggle click target. Countdown 1 (`Till upcoming`) and conditional countdown 2 (`Till Sunrise` / `Till Midnight`) are untouched; only one additional hovered target may occupy the next free slot. No new user settings or backend-specific code.
+- **Temporal correctness:** Look up the next occurrence from previously loaded cached yesterday/today/tomorrow dates, not from whichever civil-day time happens to be printed in the row. Correctly carry post-midnight `Midnight` / `Lastthird` from the previous schedule; use event-date Jumu'ah naming. Ignore a hovered target if that event is already shown as upcoming/extra. Missing future caches never fabricate a countdown.
+- **Verification:** `texlua tests/test_prayer_hover.lua` tests real widget draw/mouse code at three scales with deterministic cache; existing Task 4/5 tests and Python tests run offline. No live KDE verification is claimed until user confirms. The named hover's stationary-pointer timeout is inherited from `hover_failsafe_seconds` (default site value can be as low as 1 second) and is intentional under the current hover API.
+
+### Task 6 Hover-Region Regression Follow-Up (2026-11-23; offline fixed, live verification pending)
+- **User report:** New prayer-column hover countdowns work; `hover_failsafe_seconds = 0` stops stationary-hover flicker, but elapsed `Since` also appears when hovering over Fajr/Sunrise's visible row instead of only the empty area above Fajr. The screenshot marks both regions. Do not mistake timeout configuration for a hitbox correction.
+- **Root cause:** Prayer's older `hover_area` modes registered a hotspot reaching into the visible prayer row; `content` and `window` modes were even broader. These areas overlap Task 6's per-prayer zones.
+- **Resolution:** Removed the `hover_area` modes and wizard prompt, renamed the single internal zone to `elapsed_above_fajr`, and sized it from Cairo's measured `x0`, `max_width` and `prayer_scale` so its bottom remains above the column hover zones. `settings.ini` is intentionally excluded from the patch because it contains active user settings: an existing `hover_area` line is ignored and can be deleted. The optional red debug outline traces the single new zone. `hover_failsafe_seconds = 0` remains a user preference, not a forced source-code setting.
+- **Verification:** `texlua tests/test_prayer_hover.lua` checks the upper hotspot, all seven forbidden column regions, right/bottom boundaries, scaling (0.65, 1, 1.5) and persistent stationary hover with zero failsafe. `texlua tests/test_hover_state.lua` checks the real Prayer/Date mouse hooks. Live KDE acceptance still pending; do not mark Task 6 completed until the user confirms. No changes to the Xlib surface renderer, refresh rate, placement, or autostart.
+
+### Task 6 — Elapsed Hover Box Sized to Reference Screenshot (2026-11-23; KDE verification pending)
+- **User correction:** The first nonoverlapping `elapsed_above_fajr` rectangle was too short. The provided screenshot specifies a box directly above Fajr with roughly the same height and width as a visible prayer name+time column; the rest of Task 6 works and `hover_failsafe_seconds = 0` stopped stationary hover blinking.
+- **Geometry:** Share the measured Fajr column width and prayer-row top/bottom coordinates. The elapsed hotspot has the **same height as one prayer-column hitbox** and sits directly above it with a `3 * prayer_scale` gap; all seven column hitboxes now begin at the visible heading area instead of reaching far into the upper blank space. Keep the elapsed hotspot, all seven prayer zones, and the Midnight click zone independent. The screenshot's approximately 157×85 pixel red box is a **reference at that particular user scale**, not a hardcoded rectangle to paste into other displays/scales.
+- **Regression gate:** Check equal hitbox heights, a nonoverlapping scaled gap, all seven column zones, pointer-leave behavior and scale variants offline. Verify the enlarged hotspot and column-hover behavior in a live KDE session before marking Task 6 complete. No settings, Xlib surface, autostart or layout changes.

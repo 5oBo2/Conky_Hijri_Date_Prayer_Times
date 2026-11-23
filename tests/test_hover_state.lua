@@ -49,7 +49,7 @@ package.preload.cairo = function() return true end
 local function noop() end
 local calls = {
     'cairo_select_font_face', 'cairo_set_font_size', 'cairo_set_source_rgba',
-    'cairo_move_to', 'cairo_destroy', 'cairo_rectangle', 'cairo_set_line_width',
+    'cairo_move_to', 'cairo_destroy', 'cairo_rectangle', 'cairo_fill', 'cairo_set_line_width',
     'cairo_stroke', 'cairo_pattern_add_color_stop_rgba', 'cairo_set_source',
     'cairo_pattern_destroy', 'cairo_save', 'cairo_restore', 'cairo_translate',
     'cairo_scale', 'cairo_set_source_surface', 'cairo_paint', 'cairo_curve_to',
@@ -77,10 +77,9 @@ end
 local real_dofile = dofile
 local real_settings = real_dofile(root .. 'lib/Settings.lua')
 local real_prayer_data = real_dofile(root .. 'lib/Prayer_Data.lua')
-local area, date_mode = 'fajr_sunrise', 'date_and_weather'
+local date_mode = 'date_and_weather'
 local fake_settings = setmetatable({
     get = function(section, key, default)
-        if section == 'behavior' and key == 'hover_area' then return area end
         return real_settings.get(section, key, default)
     end,
     date_weather_mode = function() return date_mode end,
@@ -119,31 +118,32 @@ local function get_hover(callback)
     error('widget callback lost its hover state')
 end
 
--- Prayer: the existing three settings produce named-zone geometry only.
--- The final two sample points are in the broader content/window areas.
-for _, mode in ipairs({'fajr_sunrise', 'content', 'window'}) do
-    area = mode
-    assert(loadfile(root .. 'widgets/Prayer_Times.lua'))()
-    local on_mouse, draw = assert(conky_on_mouse), assert(conky_main)
-    local state = get_hover(on_mouse)
-    _G.conky_window = {width = 1400, height = 255}
-    draw()
-    local rectangles = assert(state.zones.fajr_sunrise)
-    assert(#rectangles == (mode == 'content' and 2 or 1))
-    local rect = rectangles[1]
-    move(state, (rect[1] + rect[3]) / 2, (rect[2] + rect[4]) / 2, os.time())
-    assert(state:visible('fajr_sunrise', os.time()))
-    assert(on_mouse({type = 'mouse_move', x = 700, y = 150}) == false)
-    assert(state:visible('fajr_sunrise', os.time()) == (mode ~= 'fajr_sunrise'))
-    on_mouse({type = 'mouse_move', x = 1390, y = 245})
-    assert(state:visible('fajr_sunrise', os.time()) == (mode == 'window'))
-    on_mouse({type = 'mouse_leave'})
-    assert(not state:visible('fajr_sunrise', os.time()))
-    available = false
-    draw() -- no current prayer data removes the named zone
-    assert(state.zones.fajr_sunrise == nil)
-    available = true
-end
+-- Prayer: only the upper Fajr hotspot activates elapsed time. The old
+-- full-content/window modes were removed because they overlapped prayer
+-- column hover targets and caused the observed false activations.
+assert(loadfile(root .. 'widgets/Prayer_Times.lua'))()
+local on_mouse, draw = assert(conky_on_mouse), assert(conky_main)
+local state = get_hover(on_mouse)
+_G.conky_window = {width = 1400, height = 255}
+draw()
+local rectangles = assert(state.zones.elapsed_above_fajr)
+assert(#rectangles == 1)
+local rect = rectangles[1]
+assert(rect[1] >= 0 and rect[3] <= conky_window.width)
+assert(rect[2] >= 0 and rect[4] < 255)
+move(state, (rect[1] + rect[3]) / 2,
+     (rect[2] + rect[4]) / 2, os.time())
+assert(state:visible('elapsed_above_fajr', os.time()))
+on_mouse({type = 'mouse_move', x = 700, y = 150})
+assert(not state:visible('elapsed_above_fajr', os.time()))
+on_mouse({type = 'mouse_move', x = 1390, y = 245})
+assert(not state:visible('elapsed_above_fajr', os.time()))
+on_mouse({type = 'mouse_leave'})
+assert(not state:visible('elapsed_above_fajr', os.time()))
+available = false
+draw() -- no prayer data removes the hotspot
+assert(state.zones.elapsed_above_fajr == nil)
+available = true
 
 -- Date: real draw sets the weather hitbox; hover reveals forecast text.
 date_mode = 'date_and_weather'
@@ -178,4 +178,4 @@ assert(date_only_mouse({type = 'mouse_enter', x = x, y = y}) == false)
 assert(not date_only_hover:visible('weather', os.time()))
 _G.dofile = real_dofile
 
-print('PASS: unified named hover zones, all Prayer areas, Date forecast, mouse leave and timeouts')
+print('PASS: named hover zones, Fajr-only elapsed hotspot, Date forecast, mouse leave and timeouts')

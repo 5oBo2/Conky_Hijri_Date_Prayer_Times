@@ -57,7 +57,7 @@ package.preload.cairo = function() return true end
 local function noop() end
 local calls = {
     'cairo_select_font_face', 'cairo_set_font_size', 'cairo_set_source_rgba',
-    'cairo_move_to', 'cairo_destroy', 'cairo_rectangle', 'cairo_set_line_width',
+    'cairo_move_to', 'cairo_destroy', 'cairo_rectangle', 'cairo_fill', 'cairo_set_line_width',
     'cairo_stroke',
 }
 for _, name in ipairs(calls) do _G[name] = noop end
@@ -76,7 +76,6 @@ local surface = {acquire = function() return {} end, release = function() end}
 local default_settings = {
     scale = function() return 1 end,
     get = function(section, key, default)
-        if section == 'behavior' and key == 'hover_area' then return 'content' end
         return default
     end,
     boolean = function(section, key, default)

@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Next Prayer — Isha Highlight Explorations</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Poiret+One&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --canvas: #141517;
+      --surface: #1e1e1f;
+      --surface-2: #202225;
+      --label: #9195a0;
+      --digits: #bdc5d4;
+      --bright: #f4f5fa;
+      --accent: #efb46f;
+      --stroke: rgba(255,255,255,.10);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0; color: #edf0f3; background: var(--canvas);
+      font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    .page { max-width: 1300px; padding: 44px 28px 80px; margin: auto; }
+    .masthead { display: flex; align-items: flex-start; justify-content: space-between; gap: 32px; margin-bottom: 35px; }
+    .eyebrow { color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .2em; text-transform: uppercase; margin: 0 0 12px; }
+    h1 { font-size: clamp(25px, 3vw, 36px); line-height: 1.2; letter-spacing: -.055em; font-weight: 500; margin: 0 0 9px; }
+    .intro { font-size: 14px; color: #a9acb7; line-height: 1.6; margin: 0; max-width: 680px; }
+    .top-note { display: flex; gap: 8px; align-items: center; font-size: 12px; color: #aab0bd; margin-top: 6px; white-space: nowrap; }
+    .top-note span { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+
+    .preview-wrap { border: 1px solid #414044; border-radius: 19px; overflow: hidden; background: var(--surface); box-shadow: 0 26px 70px rgba(0,0,0,.17); }
+    .preview-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 20px; background:#252528; border-bottom:1px solid rgba(255,255,255,.08); }
+    .preview-title { display:flex; align-items:center; gap:11px; font-size:13px; font-weight:600; }
+    .preview-number { width:24px; height:24px; border: 1px solid #5b5751; color: var(--accent); border-radius: 7px; display:grid; place-items:center; font-size:11px; }
+    .preview-hint { font-size: 12px; color:#9c9daa; }
+    .hero-stage { padding: 45px 36px 30px; min-height: 215px; display: flex; align-items:center; }
+    .hero-stage .clock { width: 100%; }
+    .nav { display:flex; align-items:center; flex-wrap:wrap; justify-content:center; gap:8px; padding:16px; background:#191a1c; border-top:1px solid var(--stroke); }
+    .nav button { font: 600 12px 'DM Sans',sans-serif; color:#bbbcc6; background:#26272b; border:1px solid #3a3c41; border-radius:999px; padding:9px 14px; cursor:pointer; transition: background .18s, color .18s, border-color .18s; }
+    .nav button:hover { color:white; border-color:#777; }
+    .nav button[aria-pressed="true"] { color:#171716; background:var(--accent); border-color:var(--accent); }
+
+    .section-head { display:flex; justify-content:space-between; gap:16px; align-items:flex-end; margin: 52px 0 18px; }
+    h2 { font-size: 20px; letter-spacing: -.035em; font-weight: 500; margin:0; }
+    .subhead { color: #898e9b; font-size:12px; margin:0; }
+    .compare { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px; }
+    .option { text-align:left; display:block; appearance:none; font:inherit; color:inherit; border:1px solid #35373b; background:#1d1e20; border-radius:14px; padding:0; overflow:hidden; min-width:0; cursor:pointer; transition:border-color .2s, transform .2s, box-shadow .2s; }
+    .option:hover { border-color:#92775d; transform:translateY(-2px); }
+    .option:focus-visible { outline: 2px solid var(--accent); outline-offset:3px; }
+    .option.is-selected { border-color:var(--accent); box-shadow:0 0 0 1px rgba(239,180,111,.25); }
+    .option-header { display:flex; justify-content:space-between; gap:8px; align-items:flex-start; padding:19px 21px 4px; }
+    .option-no { color:var(--accent); font-size:11px; letter-spacing:.08em; font-weight:700; }
+    .option-title { font-size:15px; font-weight:600; margin:3px 0 0; letter-spacing:-.025em; }
+    .option-pick { font-size:10px; border:1px solid rgba(239,180,111,.45); border-radius:20px; padding:4px 8px; color:var(--accent); white-space:nowrap; }
+    .option-desc { margin: 0; padding: 3px 21px 14px; color:#9a9eaa; font-size:12px; line-height:1.6; }
+    .option-preview { background:var(--surface); padding:25px 18px 17px; min-height:149px; display:flex; align-items:center; border-top:1px solid rgba(255,255,255,.045); }
+    .option-preview .clock { width:100%; }
+    .footer { font-size:12px; color:#969aa4; margin-top:26px; line-height:1.7; }
+    .footer b { color:#dadce3; font-weight:500; }
+
+    /* Shared clock */
+    .clock { color:var(--digits); }
+    .prayers { display:grid; grid-template-columns:repeat(7, minmax(0,1fr)); align-items:start; gap:clamp(4px, 1.6vw, 24px); }
+    .prayer { min-width:0; position:relative; padding:6px 2px 10px; border-radius:7px; }
+    .prayer-name, .time, .countdown-label, .countdown-time { font-family:'Poiret One','Segoe UI Light','Helvetica Neue',sans-serif; font-weight:400; }
+    .prayer-name { color:var(--label); font-size:clamp(13px,1.8vw,22px); white-space:nowrap; letter-spacing:-.02em; margin-bottom:3px; }
+    .time { color:var(--digits); font-size:clamp(27px,3.65vw,49px); line-height:1.12; white-space:nowrap; font-variant-numeric:tabular-nums; letter-spacing:-.018em; }
+    .next .prayer-name, .next .time { color:var(--bright); }
+    .countdown { margin:1px 0 0 2px; }
+    .countdown-label { color:#a7aab1; font-size:clamp(13px,1.7vw,20px); line-height:1.15; }
+    .countdown-time { display:flex; align-items:baseline; font-size:clamp(32px,3.5vw,48px); line-height:1.05; color:var(--bright); }
+    .countdown-time .minute { color:#bb383c; }
+
+    /* All emphasis is attached to the active column, not just its font brightness. */
+    .v1 .next::before { content:'NEXT'; position:absolute; top:-17px; left:2px; color:var(--accent); font:700 9px 'DM Sans',sans-serif; letter-spacing:.15em; }
+    .v1 .next::after { content:''; height:2px; position:absolute; bottom:0; left:2px; width:54%; border-radius:2px; background:var(--accent); }
+
+    .v2 .next { background:#2b2a29; outline:1px solid rgba(239,180,111,.52); padding-left:9px; padding-right:9px; margin-left:-7px; margin-right:-7px; box-shadow:0 0 24px rgba(239,180,111,.045); }
+    .v2 .next .prayer-name { color:var(--accent); }
+
+    .v3 .next { border-left:3px solid var(--accent); border-radius:0; padding-left:11px; margin-left:-11px; }
+    .v3 .next .prayer-name { color:var(--accent); }
+
+    .v4 .next .time { display:table; position:relative; padding:1px 11px 4px; margin-left:-11px; border-radius:100px; border:1px solid rgba(239,180,111,.7); box-shadow:0 0 20px rgba(239,180,111,.08); }
+    .v4 .next .prayer-name { color:var(--accent); }
+
+    .v5 .next::before { content:''; width:7px; height:7px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 4px rgba(239,180,111,.12), 0 0 20px rgba(239,180,111,.5); position:absolute; left:calc(50% - 3px); top:-11px; }
+    .v5 .next .prayer-name { color:var(--bright); }
+    .v5 .next .time { color:#fff; text-shadow:0 0 14px rgba(255,255,255,.19); }
+
+    .v6 .next { background:linear-gradient(180deg,rgba(239,180,111,.11),rgba(239,180,111,0) 95%); padding-left:8px; padding-right:8px; margin-left:-6px; margin-right:-6px; }
+    .v6 .next .prayer-name { color:var(--accent); }
+    .v6 .next::after { content:'IN 12 MIN'; display:block; margin-top:4px; width:max-content; font:700 9px 'DM Sans',sans-serif; letter-spacing:.085em; color:var(--accent); }
+
+    /* Compact comparison: the same styles at half scale */
+    .option-preview .prayers { gap:5px; }
+    .option-preview .prayer { padding:6px 1px 9px; }
+    .option-preview .prayer-name { font-size:clamp(10px,1.12vw,15px); }
+    .option-preview .time { font-size:clamp(17px,2.0vw,27px); }
+    .option-preview .countdown-label { font-size:13px; }
+    .option-preview .countdown-time { font-size:27px; }
+    .option-preview .v1 .next::before { top:-15px; font-size:8px; }
+    .option-preview .v2 .next { padding-left:5px; padding-right:5px; margin-left:-5px; margin-right:-5px; }
+    .option-preview .v3 .next { padding-left:6px; margin-left:-7px; border-left-width:2px; }
+    .option-preview .v4 .next .time { padding:2px 5px; margin-left:-5px; }
+    .option-preview .v6 .next { padding-left:5px; padding-right:5px; margin-left:-4px; margin-right:-4px; }
+    .option-preview .v6 .next::after { font-size:7px; letter-spacing:0; }
+
+    @media (max-width: 950px) {
+      .compare { grid-template-columns:1fr; }
+      .option-preview .prayer-name { font-size:clamp(12px,2vw,17px); }
+      .option-preview .time { font-size:clamp(24px,4vw,34px); }
+      .masthead { flex-wrap:wrap; }
+    }
+    @media (max-width: 680px) {
+      .page { padding:25px 14px 60px; }
+      .masthead { margin-bottom:24px; }
+      .hero-stage { padding:34px 12px 20px; overflow-x:auto; min-height:165px; }
+      .hero-stage .clock { min-width:610px; }
+      .hero-stage .prayer-name { font-size:16px; }
+      .hero-stage .time { font-size:31px; }
+      .hero-stage .countdown-label { font-size:15px; }
+      .hero-stage .countdown-time { font-size:33px; }
+      .preview-toolbar { padding:12px 13px; }
+      .preview-hint { display:none; }
+      .option-preview { overflow-x:auto; padding:25px 12px 16px; }
+      .option-preview .clock { min-width:505px; }
+      .option-preview .prayer-name { font-size:13px; }
+      .option-preview .time { font-size:25px; }
+      .section-head { align-items:flex-start; flex-direction:column; gap:5px; }
+    }
+    @media (prefers-reduced-motion: reduce) { *,*::before,*::after { transition:none !important; scroll-behavior:auto !important; } }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">UI exploration / Prayer times</p>
+        <h1>Make the next prayer unmistakable.</h1>
+        <p class="intro">Six ways to mark <strong style="color:#fff; font-weight:500">Isha</strong> as next, without losing the restrained, fine-line look of your current clock. Select any option to see it at full size.</p>
+      </div>
+      <div class="top-note"><span></span> NEXT PRAYER: ISHA</div>
+    </header>
+
+    <section class="preview-wrap" aria-label="Large interactive preview">
+      <div class="preview-toolbar">
+        <div class="preview-title"><span class="preview-number" id="active-number">01</span><span id="active-title">Tiny NEXT label + underline</span></div>
+        <div class="preview-hint">Full-size preview • click another style below</div>
+      </div>
+      <div class="hero-stage" id="hero"></div>
+      <nav class="nav" id="style-nav" aria-label="Choose highlight style"></nav>
+    </section>
+
+    <div class="section-head">
+      <h2>Compare all six</h2>
+      <p class="subhead">Tap any card to change the large preview</p>
+    </div>
+    <section class="compare" id="comparison" aria-label="Six design variations"></section>
+    <p class="footer"><b>My suggestion:</b> Option 01 if you want the smallest change that is still explicit; Option 02 if this clock is viewed from across the room. Both work better than brightness alone because they add shape and a clear visual cue.</p>
+  </main>
+  <script>
+    const prayers = [
+      ['Fajr','04:56'],['Sunrise','06:26'],['Dhuhr','11:41'],
+      ['Asr','14:37'],['Maghrib','16:56'],['Isha','18:17'],['Midnight','22:56']
+    ];
+    const options = [
+      { id:'v1', name:'Tiny NEXT label + underline', short:'Label + line', desc:'Explicit “NEXT” text plus a small gold underline. Minimal visual intrusion.', pick:true },
+      { id:'v2', name:'Soft highlighted tile', short:'Soft tile', desc:'A quiet warm surface and thin border give Isha a clear silhouette.', pick:true },
+      { id:'v3', name:'Vertical accent line', short:'Side line', desc:'A single gold bar guides the eye, without introducing a box.' },
+      { id:'v4', name:'Outlined time pill', short:'Outlined time', desc:'Only the upcoming time is outlined; the other columns stay untouched.' },
+      { id:'v5', name:'Glowing marker dot', short:'Marker dot', desc:'A luminous dot above Isha acts like a status indicator.' },
+      { id:'v6', name:'Subtle glow + countdown', short:'In 12 min', desc:'A soft column tint with “IN 12 MIN” brings urgency to the next prayer.' }
+    ];
+    let selected = 0;
+    function clock(variant) {
+      return `<div class="clock ${variant}" aria-label="Prayer times. Next prayer Isha at 18:17, in 12 minutes.">
+        <div class="prayers">${prayers.map(([name,time])=>`<div class="prayer ${name==='Isha'?'next':''}" ${name==='Isha'?'aria-current="true"':''}>
+          <div class="prayer-name">${name}</div><div class="time">${time}</div>
+        </div>`).join('')}</div>
+        <div class="countdown"><div class="countdown-label">Till Isha</div><div class="countdown-time"><span>00</span><span class="minute">12</span></div></div>
+      </div>`;
+    }
+    const hero = document.getElementById('hero');
+    const nav = document.getElementById('style-nav');
+    const comparison = document.getElementById('comparison');
+    comparison.innerHTML = options.map((o,i)=>`<button type="button" class="option" data-style="${i}" aria-label="Preview ${o.name}">
+      <div class="option-header"><div><div class="option-no">OPTION ${String(i+1).padStart(2,'0')}</div><div class="option-title">${o.name}</div></div>${o.pick?'<span class="option-pick">RECOMMENDED</span>':''}</div>
+      <p class="option-desc">${o.desc}</p>
+      <div class="option-preview">${clock(o.id)}</div>
+    </button>`).join('');
+    nav.innerHTML = options.map((o,i)=>`<button type="button" data-style="${i}" aria-pressed="false">${String(i+1).padStart(2,'0')} · ${o.short}</button>`).join('');
+    function selectStyle(i) {
+      selected=i;
+      const option=options[i];
+      hero.innerHTML=clock(option.id);
+      document.getElementById('active-number').textContent=String(i+1).padStart(2,'0');
+      document.getElementById('active-title').textContent=option.name;
+      document.querySelectorAll('[data-style]').forEach(el=>{
+        const active=Number(el.dataset.style)===i;
+        el.classList.toggle('is-selected',active);
+        if(el.closest('.nav')) el.setAttribute('aria-pressed',String(active));
+      });
+    }
+    document.querySelectorAll('[data-style]').forEach(button=>button.addEventListener('click',()=>selectStyle(Number(button.dataset.style))));
+    selectStyle(0);
+  </script>
+</body>
+</html>

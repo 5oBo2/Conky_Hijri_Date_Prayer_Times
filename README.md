@@ -53,6 +53,80 @@ without manually editing X/Y values. If an older profile lacks `[layout]`
 intent, run `--layout --widget all` once instead. Neither command restarts
 Conky; use `python3 restart.py` after validating the result.
 
+## Prayer Times: next-prayer sideline and Jumu'ah (Task 5)
+
+The next upcoming prayer is identified using **option 03, “Vertical accent
+line,”** from `isha-highlight-variations.html`: a 3-logical-pixel vertical
+stroke to the left of its column, and the prayer **name only** in warm gold
+(`#efb46f`). All times and the remaining headings retain their original
+white color and opacity. There are no tiles, gradients, additional labels,
+brightness changes to the time, or animations. Sunrise and Midnight / Last
+3rd are informational rather than normal prayer events; tomorrow's Fajr gets
+the accent after Isha if it is the next prayer.
+
+To customize the line **and** label color, optionally add this under
+`[appearance]` in your existing `settings.ini`:
+
+```ini
+next_prayer_color = #efb46f
+```
+
+The default applies even without the key, so this patch deliberately does
+**not** replace your personal `settings.ini`. Use a six-digit `#RRGGBB` color;
+invalid values produce an explicit configuration error. Restart only Prayer
+Times through KDE Autostart after changing it.
+
+The Dhuhr column's name follows the **Islamic day boundary at the local
+Maghrib prayer**, not civil midnight: Thursday Maghrib through Friday before
+Maghrib displays **Jumu'ah**, and Friday Maghrib immediately reverts to
+**Dhuhr** for Saturday. After Maghrib, that third column also shows the
+**next civil day's cached Dhuhr time** (e.g. Friday's Jumu'ah time), avoiding
+the misleading combination of a Friday label with Thursday's elapsed prayer
+time. The other columns still show today's schedule (including the upcoming
+Isha). If tomorrow's cache is not ready, the third column temporarily shows
+`--:--` until the background fetch completes.
+
+The `Till Jumu'ah` / `Since Jumu'ah` countdown labels depend on the actual
+Friday Dhuhr event timestamp, not merely the row's Islamic-day label.
+Canonical event names, athan times, the Midnight / Last 3rd click toggle,
+Xlib Cairo drawing, and the `0.25`-second refresh stay unchanged. The local
+system timezone must match the configured prayer location. The revised
+styling and day transition have offline regression tests. The user confirmed
+the visible Task 5 behavior on KDE on 2026-11-23; the exact Thursday/Friday
+Maghrib transition is still awaiting observation at the real boundary.
+
+## Prayer Times: hover an individual prayer (Task 6)
+
+Move the pointer over any of the seven prayer **name/time columns** to see a
+temporary countdown to that selected event. This does not replace the
+permanent `Till <NextPrayer>` countdown. When a separate `Till Sunrise` or
+`Till Midnight` countdown is showing after Fajr or Isha, the hovered prayer
+appears in a third countdown column; otherwise it uses the second column.
+Hovering an event already shown in either existing countdown does nothing.
+
+This includes the **actual next occurrence** of earlier-today prayers (for
+example, hovering Dhuhr at night targets tomorrow's Dhuhr), Friday
+`Jumu'ah` naming, and the current seventh-column `Midnight` / `Last 3rd`
+selection. Midnight/Lastthird after 00:00 use the proper next civil-day
+timestamp, not today's row text interpreted as an already-past event.
+If that date's cache is not available, the temporary countdown is omitted
+until the background fetch completes.
+
+The elapsed `Since` hover is restricted to a full prayer-column-sized area **above Fajr**, with a narrow gap before its visible label/time.
+It no longer triggers over Fajr/Sunrise headings, times, or the other prayer
+columns. The seventh-column click still toggles Midnight/Last 3rd. These are
+independent named zones. For steady hover under XWayland, use
+`hover_failsafe_seconds = 0` in `[behavior]`, so stationary pointers do not
+time out; moving outside the hotspot or leaving the window clears it. The old
+`hover_area` modes were removed, as their broad rectangles caused false
+elapsed-time activations. Existing `hover_area` entries are ignored and may be
+deleted from user settings; no new configuration key was added. Restart only Prayer Times after installing.
+
+The geometry and countdown slots are covered by `tests/test_prayer_hover.lua`,
+including three scales. Actual KDE hover behavior and text spacing with your
+installed font still require visual verification. See `docs/HOVER_ZONE.md`
+and ROADMAP Task 6.
+
 ## 1. Project setup
 
 Install from the **complete project directory** using `bash install.sh` (see
@@ -327,7 +401,7 @@ prayer and weather workers refresh their location-keyed caches automatically.
 
 ## 6. Data and behavior
 
-- **Prayer + Hijri:** `workers/prayer_fetch.py` uses Aladhan to populate the `CONKY_PRAYER_V2` cache consumed by `lib/Prayer_Data.lua`, including the API's `Lastthird` time (not an estimate calculated in Lua). The Hijri date rolls at Maghrib. **Left-click the seventh Prayer column** to switch its label/time between **Midnight** and **Last 3rd**. The column starts on Midnight at each launch; the post-Isha **Till Midnight** countdown never changes with this toggle. Prayer countdown and hover zones are configured with `elapsed_minutes`, `hover_area`, `hover_failsafe_seconds`, `hover_debug_outline`, `hijri_offset_days`, and `athan_enabled`; see `docs/HOVER_ZONE.md` for the mouse-hook diagnostic. X11/XWayland click delivery must be retested on your Fedora 45 Conky 1.24.2 installation. No new setting is needed. Prayer time interpretation expects your system timezone to match the configured location.
+- **Prayer + Hijri:** `workers/prayer_fetch.py` uses Aladhan to populate the `CONKY_PRAYER_V2` cache consumed by `lib/Prayer_Data.lua`, including the API's `Lastthird` time (not an estimate calculated in Lua). The Hijri date rolls at Maghrib. **Left-click the seventh Prayer column** to switch its label/time between **Midnight** and **Last 3rd**. The column starts on Midnight at each launch; the post-Isha **Till Midnight** countdown never changes with this toggle. Prayer countdown and hover zones are configured with `elapsed_minutes`, `hover_failsafe_seconds`, `hover_debug_outline`, `hijri_offset_days`, and `athan_enabled`; see `docs/HOVER_ZONE.md` for the mouse-hook diagnostic. On Fedora 45 / Conky 1.24.2 XWayland the user verified that the click toggle works. Setting `update_interval = 0.25` in `configs/conky_prayer_times.conf` (manually, on the installed widget) makes the updated column appear within the next quarter-second refresh, at the cost of four redraws per second. No new setting is needed. Prayer time interpretation expects your system timezone to match the configured location.
 - **Weather:** `weather_fetch.py` uses Open-Meteo without an API key for noncommercial personal use, caching current conditions, sunrise/sunset and tomorrow-through-day-three daily forecast data in `~/.cache/conky-sun-weather/`. Weather remains independent of Date; enabling `date_and_weather` adds a *second* current-weather display and its three-day hover forecast inside Date without suppressing standalone Weather. Unavailable forecast data is omitted instead of showing invented or outdated rows.
 - **Astrolabe:** draws a transparent Sun/Moon dial with lunar phase, night progress and solar schedule from shared caches. It discards weather solar timestamps from a different calendar day (including after sleep/wake), falling back to today's prayer cache or temporarily showing a waiting state until fresh data arrives. The 24-hour bar and lunar phase continue to update. The Astrolabe has no background card; icons for standalone Weather and Date weather are loaded from `assets/weather/`.
 
