@@ -1,10 +1,10 @@
 -- Shared, non-blocking cache access for both Conky widgets.
 -- Simple, validated line-based cache; no third-party Lua JSON library needed.
-local settings = dofile((debug.getinfo(1, 'S').source:match('^@(.*/)') or './') .. 'Settings.lua')
+local base = debug.getinfo(1, 'S').source:match('^@(.*/)') or './lib/'
+local settings = dofile(base .. 'Settings.lua')
 local M = {}
 
-local source = debug.getinfo(1, 'S').source
-M.script_dir = source:match('^@(.*/)') or './'
+M.script_dir = base .. '../workers/'
 local home = assert(os.getenv('HOME'), 'HOME is not set')
 local xdg_cache = os.getenv('XDG_CACHE_HOME')
 if not xdg_cache or xdg_cache == '' then xdg_cache = home .. '/.cache' end
@@ -50,7 +50,7 @@ function M.timestamp(date, time_string)
                     hour = math.floor(minutes / 60), min = minutes % 60, sec = 0})
 end
 
-local REQUIRED = {'Fajr', 'Sunrise', 'Dhuhr', 'Asr', 'Maghrib', 'Isha', 'Midnight'}
+local REQUIRED = {'Fajr', 'Sunrise', 'Dhuhr', 'Asr', 'Maghrib', 'Isha', 'Midnight', 'Lastthird'}
 
 function M.get(date)
     if not date or not date:match('^%d%d%d%d%-%d%d%-%d%d$') then return nil end
@@ -58,7 +58,7 @@ function M.get(date)
     local f = io.open(M.cache_dir .. '/' .. date .. '.cache', 'rb')
     if not f then return nil end
     local header = f:read('*l')
-    if header ~= 'CONKY_PRAYER_V1' then f:close(); return nil end
+    if header ~= 'CONKY_PRAYER_V2' then f:close(); return nil end
     local fields = {}
     for line in f:lines() do
         local k, v = line:match('^([%w_]+)=(.*)$')

@@ -1,11 +1,12 @@
 -- Cairo prayer times, absolute-timestamp countdowns and optional mouse hover.
 -- Local system timezone must match the chosen Aladhan location.
 require('cairo')
-local base = debug.getinfo(1, 'S').source:match('^@(.*/)') or './'
-local Surface = dofile(base .. 'Surface.lua')
-local data_source = dofile(base .. 'Prayer_Data.lua')
-local settings = dofile(base .. 'Settings.lua')
-local Hover = dofile(base .. 'Hover_State.lua')
+local base = debug.getinfo(1, 'S').source:match('^@(.*/)') or './widgets/'
+local root = base .. '../'
+local Surface = dofile(root .. 'lib/Surface.lua')
+local data_source = dofile(root .. 'lib/Prayer_Data.lua')
+local settings = dofile(root .. 'lib/Settings.lua')
+local Hover = dofile(root .. 'lib/Hover_State.lua')
 local SCALE = settings.scale('prayer')
 local ENABLE_ATHAN = settings.boolean('behavior', 'athan_enabled', true)
 
@@ -16,13 +17,19 @@ local WHITE = {1, 1, 1, 200 / 255}
 local FONT = settings.get('appearance', 'font', 'DejaVu Sans')
 local FONT_LARGE, FONT_SMALL = 50 * SCALE, 20 * SCALE
 local ELAPSED_VISIBLE_SECONDS = math.max(0, settings.number('behavior', 'elapsed_minutes', 60)) * 60
-local hover = Hover.new(settings.number('behavior', 'hover_failsafe_seconds', 5),
-                        settings.get('behavior', 'hover_area', 'content'))
+local HOVER_AREA = settings.get('behavior', 'hover_area', 'content')
+local hover = Hover.new(settings.number('behavior', 'hover_failsafe_seconds', 5))
 local last_draw_time = nil
 local last_athan_event = nil
+local show_last_third = false
 
 -- With lua_mouse_hook = 'on_mouse' in the config, Conky calls this function.
 function conky_on_mouse(event)
+    if event.type == 'button_down' and event.button == 'left'
+       and hover:contains('midnight_column', event.x, event.y) then
+        show_last_third = not show_last_third
+        return true -- prevent a click on the desktop/window behind Conky
+    end
     return hover:mouse(event, os.time())
 end
 
@@ -88,8 +95,12 @@ local function check_athan(now, prayers)
             if last_draw_time < event.ts and event.ts <= now
                and now - event.ts <= 60 and last_athan_event ~= event.ts then
                 last_athan_event = event.ts
-                local audio = base .. 'athan.wav'
+                local audio = root .. 'athan.wav'
                 local f = io.open(audio, 'rb')
+                if not f then
+                    audio = root .. 'assets/athan.wav'
+                    f = io.open(audio, 'rb')
+                end
                 if f then
                     f:close()
                     os.execute('paplay ' .. shell_quote(audio) .. ' >/dev/null 2>&1 &')
@@ -124,13 +135,14 @@ function conky_main()
     local today, events, previous, upcoming, extra = schedule(now)
     check_athan(now, events)
 
-    local cs, owned = Surface.acquire()
+    local cs = Surface.acquire()
     if not cs then return end
     local cr = cairo_create(cs)
     cairo_select_font_face(cr, FONT, CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL)
 
     if not today then
-        hover:set_zones(nil)
+        hover:set_zone('fajr_sunrise', nil)
+        hover:set_zone('midnight_column', nil)
         text(cr, 'Fetching prayer times...', FONT_SMALL, 20 * SCALE, 110 * SCALE, WHITE)
     else
         local times = today.timings
@@ -157,18 +169,20 @@ function conky_main()
         local zone_top = y0 - FONT_LARGE - 75 * SCALE
         local zone_right = x0 + stride + 50 * SCALE
         local zone_bottom = y0 - FONT_LARGE + 15 * SCALE
-        if hover.area == 'fajr_sunrise' then
-            hover:set_zones({{zone_left, zone_top, zone_right, zone_bottom}})
+        if HOVER_AREA == 'fajr_sunrise' then
+            hover:set_zone('fajr_sunrise', {zone_left, zone_top, zone_right, zone_bottom})
+        elseif HOVER_AREA == 'window' then
+            hover:set_zone('fajr_sunrise', {0, 0, conky_window.width, conky_window.height})
         else
-            -- The 'content' and 'window' options remain available.
-            hover:set_zones({
+            -- 'content' spans two visible areas but remains one named zone.
+            hover:set_zone('fajr_sunrise', {
                 {x0 - 20 * SCALE, 0, x0 + 300 * SCALE, 82 * SCALE},
                 {x0 - 20 * SCALE, 65 * SCALE,
                  x0 + total + 20 * SCALE, conky_window.height},
             })
         end
         -- Optional temporary outline to show the effective hover hotspot.
-        if hover.area == 'fajr_sunrise' and
+        if HOVER_AREA == 'fajr_sunrise' and
            settings.boolean('behavior', 'hover_debug_outline', false) then
             cairo_set_source_rgba(cr, 1, 0.28, 0.28, 0.8)
             cairo_set_line_width(cr, math.max(1, SCALE))
@@ -176,13 +190,27 @@ function conky_main()
                 zone_right - zone_left, zone_bottom - zone_top)
             cairo_stroke(cr)
         end
+        local midnight_x = x0 + (#LABELS - 1) * stride
+        -- Include the longer header as well as the large time in the hitbox.
+        cairo_set_font_size(cr, FONT_SMALL)
+        cairo_text_extents(cr, 'Midnight', extents)
+        local header_width = extents.x_advance
+        cairo_text_extents(cr, 'Last 3rd', extents)
+        header_width = math.max(header_width, extents.x_advance)
+        hover:set_zone('midnight_column', {
+            midnight_x - 15 * SCALE, y0 - FONT_LARGE - FONT_SMALL - 10 * SCALE,
+            midnight_x + math.max(max_width, header_width) + 15 * SCALE,
+            y0 + 10 * SCALE,
+        })
         for i, name in ipairs(LABELS) do
             local x = x0 + (i - 1) * stride
-            text(cr, name, FONT_SMALL, x - 10 * SCALE, y0 - FONT_LARGE, WHITE)
-            text(cr, times[name], FONT_LARGE, x, y0, WHITE)
+            local label = name == 'Midnight' and show_last_third and 'Last 3rd' or name
+            local time = name == 'Midnight' and show_last_third and times.Lastthird or times[name]
+            text(cr, label, FONT_SMALL, x - 10 * SCALE, y0 - FONT_LARGE, WHITE)
+            text(cr, time, FONT_LARGE, x, y0, WHITE)
         end
 
-        if previous and (hover:visible(now) or now - previous.ts <= ELAPSED_VISIBLE_SECONDS) then
+        if previous and (hover:visible('fajr_sunrise', now) or now - previous.ts <= ELAPSED_VISIBLE_SECONDS) then
             local elapsed = now - previous.ts
             countdown(cr, 'Since ', previous, now, x0, 20 * SCALE,
                       elapsed > 5 * 60 and elapsed < 20 * 60)
@@ -197,5 +225,5 @@ function conky_main()
         end
     end
     cairo_destroy(cr)
-    Surface.release(cs, owned)
+    Surface.release(cs)
 end

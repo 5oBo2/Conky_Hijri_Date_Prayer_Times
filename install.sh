@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the four-widget project exactly as supplied; no migrations or aliases.
+# Install the four-widget project, preserving user settings and saved layouts.
 set -euo pipefail
 SOURCE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 DEST="${XDG_CONFIG_HOME:-$HOME/.config}/conky"
@@ -27,27 +27,44 @@ if [[ "$SOURCE" != "$DEST" ]]; then
     echo "Existing Conky folder backed up: $BACKUP"
   fi
   mkdir -p -- "$DEST"
-  files=(
-    Prayer_Times.lua Hijri_Date.lua Prayer_Data.lua Surface.lua
-    Hover_State.lua Settings.lua prayer_fetch.py
-    Weather.lua Weather_Data.lua weather_fetch.py Sun_Moon_Astrolabe.lua
-    conky_prayer_times.conf conky_date.conf conky_weather.conf conky_sun_moon.conf
-    configure.py layout.py doctor.py start.sh restart.py install.sh
-    settings.ini README.md HOVER_ZONE.md
-  )
-  for filename in "${files[@]}"; do
+  for filename in configure.py doctor.py start.sh restart.py install.sh README.md ROADMAP.md widget_geometry.ini; do
     cp -- "$SOURCE/$filename" "$DEST/$filename"
   done
-  if [[ -f "$SOURCE/athan.wav" ]]; then
+  for folder in configs widgets lib workers docs; do
+    mkdir -p -- "$DEST/$folder"
+    cp -a -- "$SOURCE/$folder/." "$DEST/$folder/"
+  done
+  # Never overwrite live settings, manual monitor geometry, saved layouts, or
+  # named full-settings profiles when installing into an existing directory.
+  if [[ ! -e "$DEST/settings.ini" ]]; then
+    cp -- "$SOURCE/settings.ini" "$DEST/settings.ini"
+  fi
+  if [[ -f "$SOURCE/monitor_geometry.json" && ! -e "$DEST/monitor_geometry.json" ]]; then
+    cp -- "$SOURCE/monitor_geometry.json" "$DEST/monitor_geometry.json"
+  fi
+  for folder in profiles layouts; do
+    if [[ -d "$SOURCE/$folder" ]]; then
+      mkdir -p -- "$DEST/$folder"
+      cp -an -- "$SOURCE/$folder/." "$DEST/$folder/"
+    fi
+  done
+  if [[ -f "$SOURCE/athan.wav" && ! -e "$DEST/athan.wav" ]]; then
     cp -- "$SOURCE/athan.wav" "$DEST/athan.wav"
   fi
-  mkdir -p -- "$DEST/assets"
-  cp -a -- "$SOURCE/assets/weather" "$DEST/assets/"
+  if [[ -d "$SOURCE/assets" ]]; then
+    mkdir -p -- "$DEST/assets"
+    cp -an -- "$SOURCE/assets/." "$DEST/assets/"
+  fi
+  # The old top-level Lua, conf and worker copies are superseded by the
+  # organized layout. Do not leave ambiguous duplicates in the install root.
+  rm -f -- "$DEST"/{Prayer_Times,Hijri_Date,Weather,Sun_Moon_Astrolabe,Settings,Surface,Hover_State,Prayer_Data,Weather_Data}.lua
+  rm -f -- "$DEST"/{conky_prayer_times,conky_date,conky_weather,conky_sun_moon}.conf
+  rm -f -- "$DEST"/{prayer_fetch,weather_fetch,layout}.py
 fi
-# Retired scripts are not part of the current project and are never run.
+# Retired compatibility scripts are never launched or installed.
 rm -f -- "$DEST/upgrade_settings.py" "$DEST/restart_new.py"
 chmod +x "$DEST/start.sh" "$DEST/install.sh" "$DEST/configure.py" \
-  "$DEST/restart.py" "$DEST/doctor.py" "$DEST/prayer_fetch.py" "$DEST/weather_fetch.py"
+  "$DEST/restart.py" "$DEST/doctor.py" "$DEST/workers/prayer_fetch.py" "$DEST/workers/weather_fetch.py"
 if [[ "$make_autostart" == 1 ]]; then
   mkdir -p -- "$AUTOSTART"
   escaped_dest="${DEST//\\/\\\\}"
@@ -65,7 +82,10 @@ DESKTOP
   echo "Installed KDE/XDG autostart entry: $AUTOSTART/conky-prayer-clock.desktop"
 fi
 echo "Installed four widgets in: $DEST"
-echo "Optional Athan audio: $DEST/athan.wav"
+echo "Optional Athan audio: $DEST/athan.wav or $DEST/assets/athan.wav"
+if [[ ! -f "$DEST/assets/weather/32.png" ]]; then
+  echo "[WARN] Weather icon pack is missing from $DEST/assets/weather; supply the original PNG assets."
+fi
 if [[ "$run_wizard" == 1 && -t 0 ]]; then
   printf '\nConfigure location, font, scale and placement for all four now? [Y/n] '
   read -r answer || answer=n

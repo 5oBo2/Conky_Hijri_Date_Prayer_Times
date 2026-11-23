@@ -22,7 +22,7 @@ GROUPS = {
 
 def selected_configs(widget):
     keys = GROUPS.get(widget, (widget,))
-    return {ROOT / filename for kind in keys for filename in CONFIGS[kind]}
+    return {ROOT / 'configs' / filename for kind in keys for filename in CONFIGS[kind]}
 
 
 def matching_pids(widget='all', proc=Path('/proc')):

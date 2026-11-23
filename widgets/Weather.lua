@@ -1,17 +1,18 @@
 -- Compact transparent weather widget styled to the supplied 282x155 target.
 -- Always renders independently, including when the Date window shows weather.
 require('cairo')
-local base = debug.getinfo(1, 'S').source:match('^@(.*/)') or './'
-local Surface = dofile(base .. 'Surface.lua')
-local Weather = dofile(base .. 'Weather_Data.lua')
-local settings = dofile(base .. 'Settings.lua')
+local base = debug.getinfo(1, 'S').source:match('^@(.*/)') or './widgets/'
+local root = base .. '../'
+local Surface = dofile(root .. 'lib/Surface.lua')
+local Weather = dofile(root .. 'lib/Weather_Data.lua')
+local Weather_Icons = dofile(root .. 'lib/Weather_Icons.lua')
+local settings = dofile(root .. 'lib/Settings.lua')
 local SCALE = settings.scale('weather')
 local FONT = settings.get('appearance', 'font', 'DejaVu Sans')
 local WHITE = { 1, 1, 1, 0.96 }
 local MUTED = { 0.73, 0.81, 0.85, 0.88 }
 local BLUE = { 0.10, 0.80, 1.0, 1 }
 local ORANGE = { 1, 0.47, 0.19, 1 }
-local icons = {}
 -- Tunable icon placement (widget-local units, before weather_scale).
 local ICON_X = settings.number('appearance', 'weather_icon_x', 130)
 local ICON_Y = settings.number('appearance', 'weather_icon_y', -13)
@@ -38,46 +39,6 @@ local function text_extents(cr, s, size)
     local ext = cairo_text_extents_t:create()
     cairo_text_extents(cr, tostring(s), ext)
     return ext
-end
-local function icon_code(wmo, day)
-    -- Open-Meteo WMO weather_code and is_day -> matching transparent PNG.
-    -- Weather.lua and Hijri_Date.lua deliberately use the same condition
-    -- mapping but render independently, each in its own Conky window.
-    if wmo == 0 then return day and 32 or 31 end                 -- clear
-    if wmo == 1 then return day and 34 or 33 end                 -- mainly clear
-    if wmo == 2 then return day and 30 or 29 end                 -- partly cloudy
-    if wmo == 3 then return 26 end                               -- overcast
-    if wmo == 45 or wmo == 48 then return 20 end                 -- fog/rime fog
-    if wmo == 51 or wmo == 53 then return day and 9 or 45 end   -- drizzle
-    if wmo == 55 then return day and 6 or 45 end                 -- dense drizzle
-    if wmo == 56 or wmo == 57 then return 5 end                  -- freezing drizzle
-    if wmo == 61 then return day and 9 or 45 end                 -- slight rain
-    if wmo == 63 or wmo == 65 then return day and 6 or 45 end   -- moderate/heavy rain
-    if wmo == 66 or wmo == 67 then return 5 end                  -- freezing rain (icy mix proxy)
-    if wmo == 71 then return 13 end                              -- slight snowfall
-    if wmo == 73 or wmo == 75 then return 14 end                 -- moderate/heavy snowfall
-    if wmo == 77 then return 17 end                              -- snow grains/ice pellets proxy
-    if wmo == 80 then return day and 9 or 45 end                 -- slight rain showers
-    if wmo == 81 or wmo == 82 then return day and 6 or 45 end   -- heavier rain showers
-    if wmo == 85 then return day and 41 or 46 end                -- slight snow showers
-    if wmo == 86 then return day and 14 or 46 end                -- heavy snow showers
-    if wmo == 95 or wmo == 97 then return day and 37 or 47 end   -- thunderstorm, incl. heavy
-    if wmo == 96 or wmo == 99 then return 0 end    -- severe / hail thunderstorm
-    return 26                                                   -- unrecognized WMO code
-end
-local function icon(cr, id, x, y, size)
-    if not icons[id] then
-        local path = base .. 'assets/weather/' .. id .. '.png'
-        icons[id] = cairo_image_surface_create_from_png(path)
-    end
-    local surface = icons[id]
-    if not surface then return end
-    cairo_save(cr)
-    cairo_translate(cr, x, y)
-    cairo_scale(cr, size / 256, size / 256)
-    cairo_set_source_surface(cr, surface, 0, 0)
-    cairo_paint(cr)
-    cairo_restore(cr)
 end
 -- Both directions share the same geometry and exact vertical midpoint.
 -- Anchor this midpoint to the ink center of the temperature row, without
@@ -125,7 +86,7 @@ end
 function conky_main()
     if not conky_window then return end
     local weather = Weather.get(os.time())
-    local surface, owned = Surface.acquire()
+    local surface = Surface.acquire()
     if not surface then return end
     local cr = cairo_create(surface)
     cairo_scale(cr, SCALE, SCALE)
@@ -167,11 +128,12 @@ function conky_main()
         -- Droplet's right-hand cubic curve reaches x+~6; its stroke adds 1.
         local humidity_x = 34 + 7 + 5 - humidity_ext.x_bearing
         txt(cr, humidity, humidity_x, 121, 18)
-        icon(cr, icon_code(weather.code, weather.is_day == 1), ICON_X, ICON_Y, ICON_SIZE)
+        Weather_Icons.draw(cr, Weather_Icons.code(weather.code, weather.is_day == 1),
+            ICON_X, ICON_Y, ICON_SIZE)
         if os.time() - weather.fetched > 10800 then
             txt(cr, 'Updating…', 174, 142, 11, MUTED)
         end
     end
     cairo_destroy(cr)
-    Surface.release(surface, owned)
+    Surface.release(surface)
 end

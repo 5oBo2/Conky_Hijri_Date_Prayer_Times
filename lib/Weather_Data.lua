@@ -1,6 +1,6 @@
 -- Shared weather cache reader for independent Date, Weather and Sun windows.
 -- Loads the cache without blocking; refreshes in a background Python worker.
-local base = debug.getinfo(1, 'S').source:match('^@(.*/)') or './'
+local base = debug.getinfo(1, 'S').source:match('^@(.*/)') or './lib/'
 local settings = dofile(base .. 'Settings.lua')
 local home = assert(os.getenv('HOME'), 'HOME is not set')
 local cache_home = os.getenv('XDG_CACHE_HOME')
@@ -70,7 +70,7 @@ function M.get(now)
     if stale and now - last_attempt >= 240 then
         last_attempt = now
         local cmd = 'mkdir -p ' .. quote(cache_dir) .. ' && python3 ' ..
-             quote(base .. 'weather_fetch.py') .. ' >>' .. quote(cache_dir .. '/fetch.log') .. ' 2>&1 &'
+             quote(base .. '../workers/weather_fetch.py') .. ' >>' .. quote(cache_dir .. '/fetch.log') .. ' 2>&1 &'
         os.execute(cmd)
     end
     -- The shared cache may still contain yesterday's data if a fetch fails.

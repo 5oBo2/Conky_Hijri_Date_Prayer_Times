@@ -5,11 +5,12 @@
 -- The sun indicator represents day progress; the blue indicator represents
 -- progress through the NIGHT interval (not the Moon's position in the sky).
 require('cairo')
-local base = debug.getinfo(1, 'S').source:match('^@(.*/)') or './'
-local Surface = dofile(base .. 'Surface.lua')
-local Weather = dofile(base .. 'Weather_Data.lua')
-local Prayer = dofile(base .. 'Prayer_Data.lua')
-local settings = dofile(base .. 'Settings.lua')
+local base = debug.getinfo(1, 'S').source:match('^@(.*/)') or './widgets/'
+local root = base .. '../'
+local Surface = dofile(root .. 'lib/Surface.lua')
+local Weather = dofile(root .. 'lib/Weather_Data.lua')
+local Prayer = dofile(root .. 'lib/Prayer_Data.lua')
+local settings = dofile(root .. 'lib/Settings.lua')
 local SCALE = settings.scale('sun_moon')
 local FONT = settings.get('appearance', 'font', 'DejaVu Sans')
 local PI = math.pi
@@ -122,8 +123,12 @@ end
 -- Reuse the original location/timezone behavior, cache, and sunrise/Maghrib
 -- precedence. This requires the same Weather_Data.lua and Prayer_Data.lua.
 local function sun_schedule(now, weather)
+    -- Weather.get() deliberately serves stale cache while refreshing in the
+    -- background. After suspend or a date rollover, yesterday's solar times
+    -- must NEVER be treated as today's (they would show NIGHT 100% all day).
+    local today = os.date('%Y-%m-%d', now)
     local events = {}
-    if weather then
+    if weather and weather.local_date == today then
         events = {
             sunrise = weather.sunrise,
             sunset = weather.sunset,
@@ -133,11 +138,12 @@ local function sun_schedule(now, weather)
             sunset_label = weather.sunset_label,
         }
     end
-    if not weather or os.date('%Y-%m-%d', now) == weather.local_date then
-        local today = os.date('%Y-%m-%d', now)
+    -- Prayer data is an independent, date-keyed fallback, including while a
+    -- fresh weather response is still in flight after waking the computer.
+    do
         local yesterday = Prayer.date_plus(today, -1)
         local tomorrow = Prayer.date_plus(today, 1)
-        if now - last_prayer_ensure > 60 then
+        if now - last_prayer_ensure > 60 or now < last_prayer_ensure then
             Prayer.ensure_dates({ today, yesterday, tomorrow }, now)
             last_prayer_ensure = now
         end
@@ -446,7 +452,7 @@ function conky_main()
     local weather = Weather.get(now)
     local schedule = sun_schedule(now, weather)
     local phase_name, illum_pct, cycle, illum = moon_phase(now)
-    local surface, owned = Surface.acquire()
+    local surface = Surface.acquire()
     if not surface then return end
     local cr = cairo_create(surface)
     cairo_set_antialias(cr, CAIRO_ANTIALIAS_BEST)
@@ -457,5 +463,5 @@ function conky_main()
     draw_moon(cr, phase_name, illum_pct, cycle, illum, schedule and schedule.day or false)
     draw_timeline(cr, now, schedule)
     cairo_destroy(cr)
-    Surface.release(surface, owned)
+    Surface.release(surface)
 end

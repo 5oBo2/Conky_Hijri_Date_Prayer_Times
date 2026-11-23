@@ -2,12 +2,14 @@
 -- Date modes: date_only or date_and_weather (hover-reveal details).
 -- The independent Weather.lua window remains visible in either mode.
 require('cairo')
-local base = debug.getinfo(1, 'S').source:match('^@(.*/)') or './'
-local Surface = dofile(base .. 'Surface.lua')
-local data_source = dofile(base .. 'Prayer_Data.lua')
-local Weather = dofile(base .. 'Weather_Data.lua')
-local settings = dofile(base .. 'Settings.lua')
-local Hover = dofile(base .. 'Hover_State.lua')
+local base = debug.getinfo(1, 'S').source:match('^@(.*/)') or './widgets/'
+local root = base .. '../'
+local Surface = dofile(root .. 'lib/Surface.lua')
+local data_source = dofile(root .. 'lib/Prayer_Data.lua')
+local Weather = dofile(root .. 'lib/Weather_Data.lua')
+local Weather_Icons = dofile(root .. 'lib/Weather_Icons.lua')
+local settings = dofile(root .. 'lib/Settings.lua')
+local Hover = dofile(root .. 'lib/Hover_State.lua')
 
 local SCALE = settings.scale('date')
 local DAYS_ADJUSTMENT = math.floor(settings.number('behavior', 'hijri_offset_days', 0))
@@ -28,8 +30,7 @@ local DATE_WEATHER_HOVER_TEMP_SIZE = settings.number('appearance', 'date_weather
 local DATE_WEATHER_ICON_BASE = settings.number('appearance', 'date_weather_icon_size')
 local DATE_WEATHER_ICON_DX = settings.number('appearance', 'date_weather_icon_dx') * SCALE
 local DATE_WEATHER_ICON_DY = settings.number('appearance', 'date_weather_icon_dy') * SCALE
-local hover = Hover.new(settings.number('behavior', 'date_weather_hover_failsafe_seconds'), 'content')
-local icons = {}
+local hover = Hover.new(settings.number('behavior', 'date_weather_hover_failsafe_seconds'))
 
 function conky_on_mouse(event)
     if not DATE_SHOW_WEATHER then return false end
@@ -52,48 +53,6 @@ local function measure(cr, value, size)
     local ext = cairo_text_extents_t:create()
     cairo_text_extents(cr, tostring(value), ext)
     return ext
-end
-
-local function icon_code(wmo, day)
-    -- Open-Meteo WMO weather_code and is_day -> matching transparent PNG.
-    -- Weather.lua and Hijri_Date.lua deliberately use the same condition
-    -- mapping but render independently, each in its own Conky window.
-    if wmo == 0 then return day and 32 or 31 end                 -- clear
-    if wmo == 1 then return day and 34 or 33 end                 -- mainly clear
-    if wmo == 2 then return day and 30 or 29 end                 -- partly cloudy
-    if wmo == 3 then return 26 end                               -- overcast
-    if wmo == 45 or wmo == 48 then return 20 end                 -- fog/rime fog
-    if wmo == 51 or wmo == 53 then return day and 9 or 45 end   -- drizzle
-    if wmo == 55 then return day and 6 or 45 end                 -- dense drizzle
-    if wmo == 56 or wmo == 57 then return 5 end                  -- freezing drizzle
-    if wmo == 61 then return day and 9 or 45 end                 -- slight rain
-    if wmo == 63 or wmo == 65 then return day and 6 or 45 end   -- moderate/heavy rain
-    if wmo == 66 or wmo == 67 then return 5 end                  -- freezing rain (icy mix proxy)
-    if wmo == 71 then return 13 end                              -- slight snowfall
-    if wmo == 73 or wmo == 75 then return 14 end                 -- moderate/heavy snowfall
-    if wmo == 77 then return 17 end                              -- snow grains/ice pellets proxy
-    if wmo == 80 then return day and 9 or 45 end                 -- slight rain showers
-    if wmo == 81 or wmo == 82 then return day and 6 or 45 end   -- heavier rain showers
-    if wmo == 85 then return day and 41 or 46 end                -- slight snow showers
-    if wmo == 86 then return day and 14 or 46 end                -- heavy snow showers
-    if wmo == 95 or wmo == 97 then return day and 37 or 47 end   -- thunderstorm, incl. heavy
-    if wmo == 96 or wmo == 99 then return 0 end    -- severe / hail thunderstorm
-    return 26                                                   -- unrecognized WMO code
-end
-
-local function draw_icon(cr, id, x, y, size)
-    if not icons[id] then
-        local path = base .. 'assets/weather/' .. id .. '.png'
-        icons[id] = cairo_image_surface_create_from_png(path)
-    end
-    local surface = icons[id]
-    if not surface then return end
-    cairo_save(cr)
-    cairo_translate(cr, x, y)
-    cairo_scale(cr, size / 256, size / 256)
-    cairo_set_source_surface(cr, surface, 0, 0)
-    cairo_paint(cr)
-    cairo_restore(cr)
 end
 
 local function draw_divider(cr, x, top_y, bottom_y)
@@ -232,7 +191,7 @@ local function draw_three_day_forecast(cr, weather, clock_top, clock_bottom)
         text(cr, day.day, label_x, row_y + 13 * SCALE, WHITE)
         cairo_set_font_size(cr, temp_size)
         text(cr, temperatures[i], label_x, row_y + 32 * SCALE, BRIGHT_WHITE)
-        draw_icon(cr, icon_code(day.code, true), icon_x, row_y + 4 * SCALE, icon_size)
+        Weather_Icons.draw(cr, Weather_Icons.code(day.code, true), icon_x, row_y + 4 * SCALE, icon_size)
     end
 end
 
@@ -257,12 +216,12 @@ local function draw_date_weather_header(cr, now, clock)
     local div_x = start_x + clock_ext.x_advance + div_gap
     local weather_x = div_x + div_gap
 
-    hover:set_zones({ {
+    hover:set_zone('weather', {
         div_x,
         0, -- includes the first forecast row, above the clock numerals
         conky_window.width, -- hover stays active over the right forecast area
         clock_baseline + 18 * SCALE,
-    } })
+    })
 
     -- Clock
     cairo_set_font_size(cr, DATE_WEATHER_CLOCK_SIZE)
@@ -272,7 +231,7 @@ local function draw_date_weather_header(cr, now, clock)
     draw_divider(cr, div_x, clock_top - 4 * SCALE, clock_baseline + 6 * SCALE)
 
     -- Weather (Idle vs Hover)
-    if weather and hover:visible(now) then
+    if weather and hover:visible('weather', now) then
         local ratio = DATE_WEATHER_HOVER_TEMP_SIZE / DATE_WEATHER_CLOCK_SIZE
         local small_num_ext = measure(cr, temp_num, DATE_WEATHER_HOVER_TEMP_SIZE)
         local small_baseline = clock_top - small_num_ext.y_bearing + 2 * SCALE
@@ -282,7 +241,7 @@ local function draw_date_weather_header(cr, now, clock)
 
         cairo_set_font_size(cr, DATE_WEATHER_HOVER_TEMP_SIZE)
         text(cr, temp_full, weather_x, small_baseline, BRIGHT_WHITE)
-        draw_icon(cr, icon_code(weather.code, weather.is_day == 1),
+        Weather_Icons.draw(cr, Weather_Icons.code(weather.code, weather.is_day == 1),
             small_icon_x, small_icon_y, small_icon_size)
         draw_weather_details(cr, weather, weather_x, clock_baseline - 2 * SCALE, SCALE)
         local clock_bottom = clock_baseline + clock_ext.y_bearing + clock_ext.height
@@ -293,7 +252,7 @@ local function draw_date_weather_header(cr, now, clock)
         if weather then
             local icon_x = weather_x + icon_rel_x
             local icon_y = clock_baseline - icon_size * 0.86 + DATE_WEATHER_ICON_DY
-            draw_icon(cr, icon_code(weather.code, weather.is_day == 1),
+            Weather_Icons.draw(cr, Weather_Icons.code(weather.code, weather.is_day == 1),
                 icon_x, icon_y, icon_size)
         end
     end
@@ -316,7 +275,7 @@ function conky_main()
         data_source.date_plus(actual_today, 1) }, now)
     local hijri_data = actual_data and data_source.get(hijri_date)
 
-    local cs, owned = Surface.acquire()
+    local cs = Surface.acquire()
     if not cs then return end
     local cr = cairo_create(cs)
     local ext = cairo_text_extents_t:create()
@@ -330,7 +289,7 @@ function conky_main()
     if DATE_SHOW_WEATHER then
         draw_date_weather_header(cr, now, clock)
     else
-        hover:set_zones(nil)
+        hover:set_zone('weather', nil)
         cairo_set_font_size(cr, FONT_CLOCK)
         text(cr, clock, (conky_window.width - width(cr, clock, ext)) / 2,
             FONT_CLOCK, WHITE)
@@ -368,5 +327,5 @@ function conky_main()
             y_hijri, WHITE)
     end
     cairo_destroy(cr)
-    Surface.release(cs, owned)
+    Surface.release(cs)
 end

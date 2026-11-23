@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fetch and atomically cache Aladhan schedules without blocking Conky.
 
-Usage: python3 prayer_fetch.py YYYY-MM-DD [YYYY-MM-DD ...]
+Usage: python3 workers/prayer_fetch.py YYYY-MM-DD [YYYY-MM-DD ...]
 The cache is shared by all Conky processes. Requires Python 3 only.
 """
 import datetime as dt
@@ -16,7 +16,8 @@ import tempfile
 import urllib.parse
 import urllib.request
 
-CONFIG_FILE = pathlib.Path(__file__).resolve().parent / 'settings.ini'
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+CONFIG_FILE = ROOT / 'settings.ini'
 LOCATION_KEYS = ('mode', 'city', 'country', 'state', 'latitude',
                  'longitude', 'method', 'school', 'midnight_mode')
 
@@ -48,7 +49,7 @@ def get_location():
 CACHE_HOME = pathlib.Path(os.environ.get('XDG_CACHE_HOME') or
                           str(pathlib.Path.home() / '.cache'))
 CACHE_DIR = CACHE_HOME / 'conky-prayer-times'
-REQUIRED_TIMES = ('Fajr', 'Sunrise', 'Dhuhr', 'Asr', 'Maghrib', 'Isha', 'Midnight')
+REQUIRED_TIMES = ('Fajr', 'Sunrise', 'Dhuhr', 'Asr', 'Maghrib', 'Isha', 'Midnight', 'Lastthird')
 
 
 def valid(payload, signature):
@@ -89,7 +90,7 @@ def cache_content(date, payload, signature):
                    ('hijri_year', str(int(hijri['year'])))))
     if any('\n' in value or '\r' in value for _, value in fields):
         raise ValueError('Newline in location settings')
-    return 'CONKY_PRAYER_V1\n' + ''.join(f'{k}={v}\n' for k, v in fields)
+    return 'CONKY_PRAYER_V2\n' + ''.join(f'{k}={v}\n' for k, v in fields)
 
 
 def cache_is_current(path, signature, date):
@@ -97,7 +98,7 @@ def cache_is_current(path, signature, date):
         text = path.read_text(encoding='utf-8')
         lines = text.splitlines()
         entries = dict(line.split('=', 1) for line in lines[1:])
-        if lines[0] != 'CONKY_PRAYER_V1' or len(entries) != len(lines) - 1:
+        if lines[0] != 'CONKY_PRAYER_V2' or len(entries) != len(lines) - 1:
             return False
         if entries.get('signature') != signature or entries.get('date') != date:
             return False

@@ -19,12 +19,10 @@ while (($#)); do
   esac
 done
 case "$selection" in all|prayer|date|weather|sun_moon) ;; *) echo "Unknown widget: $selection" >&2; exit 2 ;; esac
-if ! command -v conky >/dev/null 2>&1; then
-  echo 'Conky is missing. Install Conky with Lua/Cairo support.' >&2
-  exit 1
-fi
+# Validate the intentionally selected X11/XWayland backend before launch.
+python3 "$DIR/doctor.py" --runtime-only || exit 1
 if [[ "$delay" != "0" ]]; then sleep "$delay"; fi
-launch() { conky -d -c "$DIR/$1"; }
+launch() { conky -d -c "$DIR/configs/$1"; }
 case "$selection" in
   all)      launch conky_date.conf; launch conky_prayer_times.conf; launch conky_weather.conf; launch conky_sun_moon.conf ;;
   date)     launch conky_date.conf ;;

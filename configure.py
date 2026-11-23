@@ -10,10 +10,56 @@ import configparser
 import pathlib
 import re
 import sys
+import tempfile
 
-import layout
+from workers import layout
 
 PATH = pathlib.Path(__file__).resolve().with_name("settings.ini")
+PROFILES = PATH.with_name("profiles")
+
+
+def profile_path(name):
+    # No paths or extensions: profiles live only inside profiles/.
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", name):
+        raise ValueError("Profile name must use letters, digits, _ or -, starting with a letter or digit")
+    return PROFILES / f"{name}.ini"
+
+
+def write_atomic(path, content):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                     prefix=f".{path.name}-", delete=False) as out:
+        temp = pathlib.Path(out.name)
+        try:
+            out.write(content)
+            out.flush()
+        except BaseException:
+            temp.unlink(missing_ok=True)
+            raise
+    try:
+        temp.replace(path)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def use_profile(name):
+    path = profile_path(name)
+    if not path.is_file():
+        raise ValueError(f"No saved profile named {name!r}")
+    profile = configparser.ConfigParser(
+        interpolation=None, inline_comment_prefixes=("#", ";")
+    )
+    if not profile.read(path, encoding="utf-8"):
+        raise ValueError(f"Cannot load {path}")
+    validate(profile)  # Never replace a valid active file with an invalid profile.
+    write_atomic(PATH, path.read_text(encoding="utf-8"))
+
+
+def save_profile(name, cp):
+    validate(cp)
+    path = profile_path(name)
+    write_atomic(path, PATH.read_text(encoding="utf-8"))
+    return path
 
 
 def read():
@@ -97,6 +143,9 @@ def validate(cp):
             raise ValueError(f"{key} must be between -300 and 300")
     if not cp.get("appearance", "font").strip():
         raise ValueError("font must not be empty")
+    for kind in layout.WIDGETS:
+        if cp.has_option('layout', kind + '_output'):
+            layout._layout_intent(cp, kind)  # reject malformed saved intent
     for key in (
         "prayer_x",
         "prayer_y",
@@ -120,23 +169,58 @@ def change(cp, section, key, label):
 
 
 def save_preserving_comments(cp):
-    # Keep headings and explanations in settings.ini when the wizard writes it.
-    # Keys are only replaced within their matching section.
-    lines = PATH.read_text(encoding="utf-8").splitlines(keepends=True)
+    """Update values, layout metadata, and obsolete Wayland comment blocks.
+
+    Unlike ConfigParser.write(), this retains the project's human explanations.
+    All saving actions use the same atomic replacement.
+    """
+    source = PATH.read_text(encoding='utf-8')
+    # Migration of comments only. Existing placement values are preserved unless
+    # --layout/--reflow-layout explicitly recalculates them.
+    source = re.sub(
+        r'(?m)^# Native Wayland output-local requests passed to Conky gap_x/gap_y\.\n'
+        r'(?:^#.*\n){0,8}?(?=prayer_x\s*=)',
+        '# X11/XWayland virtual-desktop coordinates passed to Conky gap_x/gap_y.\n'
+        '# Recalculate via configure.py --reflow-layout after switching back.\n'
+        '# Monitor/anchor/margins are recorded in [layout] when using --layout.\n',
+        source,
+    )
+    source = source.replace(
+        '# Do not mistake the intended output for an enforced Wayland assignment.',
+        '# The output name and anchor generate global X11/XWayland coordinates.',
+    )
+    lines = source.splitlines(keepends=True)
     section = None
     output = []
+    seen = set()
+    present_sections = set()
+
+    def append_missing(current):
+        if current is None or not cp.has_section(current):
+            return
+        for key, value in cp.items(current):
+            if (current, key) not in seen:
+                output.append(f'{key} = {value}\n')
+                seen.add((current, key))
+
     for line in lines:
-        match = re.match(r"^\s*\[([\w_]+)\]\s*$", line.strip())
+        match = re.match(r'^\s*\[([\w_]+)\]\s*$', line.strip())
         if match:
+            append_missing(section)
             section = match.group(1)
-        item = re.match(r"^(\s*([\w_]+)\s*=\s*)([^\r\n]*)(\r?\n?)$", line)
-        if item and section and section in cp and item.group(2) in cp[section]:
-            value = cp[section][item.group(2)]
-            line = item.group(1) + value + (item.group(4) or "\n")
+            present_sections.add(section)
+        item = re.match(r'^(\s*([\w_]+)\s*=\s*)([^\r\n]*)(\r?\n?)$', line)
+        if item and section and cp.has_option(section, item.group(2)):
+            key = item.group(2)
+            line = item.group(1) + cp[section][key] + (item.group(4) or '\n')
+            seen.add((section, key))
         output.append(line)
-    tmp = PATH.with_suffix(".ini.tmp")
-    tmp.write_text("".join(output), encoding="utf-8")
-    tmp.replace(PATH)
+    append_missing(section)
+    for section in cp.sections():
+        if section not in present_sections:
+            output.append(f'\n[{section}]\n')
+            append_missing(section)
+    write_atomic(PATH, ''.join(output))
 
 
 def main():
@@ -153,7 +237,18 @@ def main():
         ),
         help="configure any widget or all four (prompt if omitted)",
     )
+    profiles = parser.add_mutually_exclusive_group()
+    profiles.add_argument("--save-profile", metavar="NAME",
+                          help="save ALL current settings as a named snapshot (e.g. home)")
+    profiles.add_argument("--use-profile", metavar="NAME",
+                          help="activate a named full-settings snapshot")
+    profiles.add_argument("--list-profiles", action="store_true",
+                          help="list saved full-settings profiles")
     parser.add_argument("--show", action="store_true", help="print current values")
+    parser.add_argument(
+        "--reflow-layout", action="store_true",
+        help="recalculate requested coordinates from saved output/anchor/margins",
+    )
     parser.add_argument("--check", action="store_true", help="validate settings")
     parser.add_argument(
         "--screens", action="store_true", help="list detected monitor geometry"
@@ -171,27 +266,45 @@ def main():
     parser.add_argument(
         "--check-layout",
         action="store_true",
-        help="estimate widget bounds and warn about clipping/offscreen placement",
+        help="check intended window rectangles and stale geometry (not Cairo ink)",
     )
     parser.add_argument(
         "--save-layout",
         metavar="NAME",
-        help="save current sizes/positions as a named preset",
+        help="save scales and named-output/anchor intent as a reusable preset",
     )
     parser.add_argument(
         "--use-layout",
         metavar="NAME",
-        help="activate saved sizes/positions, leaving location and behavior alone",
+        help="reflow saved anchor/output plan for current screens",
     )
     parser.add_argument(
         "--list-layouts", action="store_true", help="list saved layout presets"
     )
     args = parser.parse_args()
+    if (args.save_profile or args.use_profile or args.list_profiles) and (
+        args.widget or args.show or args.check or args.screens or args.layout
+        or args.manual_screens or args.check_layout or args.reflow_layout or args.save_layout
+        or args.use_layout or args.list_layouts
+    ):
+        parser.error("profile actions operate on all settings and must be used alone")
+    if args.list_profiles:
+        names = sorted(p.stem for p in PROFILES.glob("*.ini") if p.is_file())
+        print("Saved profiles: " + (", ".join(names) or "(none)"))
+        return
+    if args.use_profile:
+        use_profile(args.use_profile)
+        print(f"Activated full-settings profile {args.use_profile!r}. Restart all four Conky widgets.")
+        return
     if args.widget == "shared" and (
-        args.layout or args.check_layout or args.save_layout or args.use_layout
+        args.layout or args.check_layout or args.reflow_layout or args.save_layout or args.use_layout
     ):
         parser.error("--widget shared is for the configuration wizard, not layouts")
     cp = read()
+    if args.save_profile:
+        path = save_profile(args.save_profile, cp)
+        print(f"Saved all current settings to {path}")
+        return
     if args.screens:
         displays, source = layout.monitors()
         layout.show_screens(displays, source)
@@ -214,12 +327,20 @@ def main():
         print(f"Saved layout: {path}")
         return
     if args.use_layout:
-        layout.use_layout(cp, args.use_layout, args.widget or "all")
+        if layout.use_layout(cp, args.use_layout, args.widget or "all") is None:
+            return
         validate(cp)
         save_preserving_comments(cp)
         print(
-            f"Activated layout {args.use_layout} for {args.widget or 'all'}. Restart affected Conky instances."
+            f"Activated layout {args.use_layout} for {args.widget or 'all'}. Restart affected Conky instances; confirm actual output on KDE."
         )
+        return
+    if args.reflow_layout:
+        if layout.reflow(cp, args.widget or "all") is None:
+            return
+        validate(cp)
+        save_preserving_comments(cp)
+        print('Saved global X11/XWayland positions; restart affected widgets and verify placement.')
         return
     if args.layout:
         if layout.wizard(cp, args.widget or "all") is None:
@@ -227,7 +348,7 @@ def main():
         validate(cp)
         save_preserving_comments(cp)
         print(
-            f"Saved monitor-aware placement for {args.widget or 'all'}. Restart affected Conky instances."
+            f"Saved global X11/XWayland placement for {args.widget or 'all'}. Restart affected Conky instances; verify physical output on KDE."
         )
         return
     if args.show:

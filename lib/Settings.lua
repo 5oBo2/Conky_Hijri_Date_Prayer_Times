@@ -1,8 +1,8 @@
 -- Tiny dependency-free INI reader shared by the Conky configs and draw scripts.
--- Put this file with settings.ini in ~/.config/conky/.
+-- Resolve the project root from lib/; settings.ini stays at the root.
 local M = {}
 local origin = debug.getinfo(1, 'S').source
-M.dir = origin:match('^@(.*/)') or ((os.getenv('HOME') or '') .. '/.config/conky/')
+M.dir = (origin:match('^@(.*/)') or './lib/') .. '../'
 local values = {}
 local section
 local file, err = io.open(M.dir .. 'settings.ini', 'r')

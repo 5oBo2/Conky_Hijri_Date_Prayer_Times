@@ -1,20 +1,18 @@
 #!/usr/bin/env python3
-"""Monitor-aware placement helper for Conky widgets on KDE Plasma.
+"""Global X11/XWayland layout planner for all four Conky widgets.
 
-Only uses the Python standard library and `kscreen-doctor -o` (if installed).
-Conky's X11 placement is expressed in virtual-desktop coordinates; positioning
-on native Wayland depends on the compositor and may not match these estimates.
+KScreen output names identify a monitor; its logical x/y origin is added to
+widget-local anchor offsets to obtain a virtual-desktop position. This assumes
+XWayland and KScreen agree on geometry; verify mixed-DPI layouts on KDE.
+See docs/NATIVE_WAYLAND_MIGRATION.md before reconsidering native Wayland.
 """
 import configparser
+from functools import lru_cache
 import json
 import math
-import os
 from pathlib import Path
 import re
 import subprocess
-
-BASE = {'prayer': (1100, 255), 'date': (700, 290),
-        'weather': (340, 172), 'sun_moon': (416, 432)}
 
 WIDGETS = ('prayer', 'date', 'weather', 'sun_moon')
 
@@ -30,8 +28,10 @@ ANCHORS = (
     'middle-left', 'center', 'middle-right',
     'bottom-left', 'bottom-center', 'bottom-right',
 )
-LAYOUT_DIR = Path(__file__).resolve().with_name('layouts')
-MANUAL_MONITORS = Path(__file__).resolve().with_name('monitor_geometry.json')
+ROOT = Path(__file__).resolve().parent.parent
+LAYOUT_DIR = ROOT / 'layouts'
+MANUAL_MONITORS = ROOT / 'monitor_geometry.json'
+GEOMETRY_FILE = ROOT / 'widget_geometry.ini'
 
 
 def displays_from_kscreen_json(output):
@@ -138,17 +138,6 @@ def enter_manual_monitors():
         displays.append({'name': name, 'x': x, 'y': y, 'w': w, 'h': h})
     return displays
 
-def displays_from_xrandr(output):
-    displays = []
-    for line in output.splitlines():
-        # xrandr --listmonitors: 0: +*DP-1 1920/530x1080/300+0+0 DP-1
-        m = re.search(r'^\s*\d+:\s+\S+\s+(\d+)/(?:\d+)x(\d+)/(?:\d+)\+(-?\d+)\+(-?\d+)\s+(\S+)', line)
-        if m:
-            w, h, x, y = map(int, m.group(1, 2, 3, 4))
-            displays.append({'name': m.group(5), 'x': x, 'y': y, 'w': w, 'h': h})
-    return displays
-
-
 def monitors():
     # `-o` prints the compositor's logical Geometry (including scaling);
     # fall back to machine-readable JSON if its text format is unrecognized.
@@ -163,25 +152,28 @@ def monitors():
                     return displays, 'kscreen-doctor ' + flag
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
             break
-    # XRandR on Wayland can report only an XWayland virtual screen;
-    # don't mistake it for real monitor geometry.
-    if os.environ.get('XDG_SESSION_TYPE', '').lower() == 'x11':
-        try:
-            result = subprocess.run(['xrandr', '--listmonitors'], capture_output=True,
-                                    text=True, timeout=6, check=False)
-            if result.returncode == 0:
-                displays = displays_from_xrandr(result.stdout)
-                if displays:
-                    return displays, 'xrandr --listmonitors'
-        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-            pass
     saved = saved_manual_monitors()
     if saved:
         return saved, 'saved manual geometry (may be outdated)'
     return [], None
 
+@lru_cache(maxsize=1)
+def canvas_sizes():
+    """The exact minimum-size definitions used by Lua Conky configs."""
+    cp = configparser.ConfigParser(interpolation=None)
+    if not cp.read(GEOMETRY_FILE, encoding='utf-8'):
+        raise ValueError(f'Missing authoritative widget canvas: {GEOMETRY_FILE}')
+    result = {}
+    for kind in WIDGETS:
+        width, height = cp.getint(kind, 'width'), cp.getint(kind, 'height')
+        if width <= 0 or height <= 0:
+            raise ValueError(f'Invalid canvas size for {kind}')
+        result[kind] = (width, height)
+    return result
+
+
 def scaled_size(kind, scale):
-    w, h = BASE[kind]
+    w, h = canvas_sizes()[kind]
     return (int(math.floor(w * scale + .5)), int(math.floor(h * scale + .5)))
 
 
@@ -190,18 +182,19 @@ def calculate_position(monitor, kind, scale, anchor, margin_x, margin_y):
         raise ValueError(f'Unknown anchor {anchor}')
     w, h = scaled_size(kind, scale)
     if 'left' in anchor:
-        x = monitor['x'] + margin_x
+        x = margin_x
     elif 'right' in anchor:
-        x = monitor['x'] + monitor['w'] - w - margin_x
+        x = monitor['w'] - w - margin_x
     else:
-        x = monitor['x'] + (monitor['w'] - w) // 2
+        x = (monitor['w'] - w) // 2
     if anchor.startswith('top'):
-        y = monitor['y'] + margin_y
+        y = margin_y
     elif anchor.startswith('bottom'):
-        y = monitor['y'] + monitor['h'] - h - margin_y
+        y = monitor['h'] - h - margin_y
     else:
-        y = monitor['y'] + (monitor['h'] - h) // 2
-    return x, y
+        y = (monitor['h'] - h) // 2
+    # X11/XWayland Conky gap_x/gap_y use virtual-screen coordinates.
+    return monitor['x'] + x, monitor['y'] + y
 
 
 def get_boxes(cp, widget='all'):
@@ -223,36 +216,77 @@ def show_screens(displays, source):
     if not displays:
         print('No monitor geometry detected. Try: kscreen-doctor -o')
         print('If kscreen-doctor fails, enter geometry with: python3 configure.py --manual-screens')
-        print('On X11, you can also try: xrandr --listmonitors')
         return
     print(f'Detected monitors ({source}):')
     for i, m in enumerate(displays, 1):
-        print(f"  {i}. {m['name']}: {m['w']}x{m['h']} at ({m['x']},{m['y']})")
+        print(f"  {i}. {m['name']}: {m['w']}x{m['h']} logical ({m['x']},{m['y']} compositor position)")
+
+
+def _layout_intent(cp, kind):
+    """Return an optional named-output/anchor layout plan."""
+    if not cp.has_section('layout') or not cp.has_option('layout', kind + '_output'):
+        return None
+    section = cp['layout']
+    try:
+        output = section[kind + '_output']
+        anchor = section[kind + '_anchor']
+        margin_x = int(section[kind + '_margin_x'])
+        margin_y = int(section[kind + '_margin_y'])
+    except (KeyError, ValueError) as exc:
+        raise ValueError(f'Incomplete layout intent for {kind}') from exc
+    if anchor not in ANCHORS or margin_x < 0 or margin_y < 0:
+        raise ValueError(f'Invalid layout intent for {kind}')
+    return output, anchor, margin_x, margin_y
 
 
 def check_layout(cp, widget='all'):
     displays, source = monitors()
     show_screens(displays, source)
-    print('\nEstimated Conky rectangles (X,Y,W,H):')
-    boxes = list(get_boxes(cp, widget))
-    for kind, r in boxes:
+    by_name = {mon['name']: mon for mon in displays}
+    print('\nEstimated X11/XWayland rectangles (global x, y, W, H):')
+    print('Positions assume XWayland and KScreen share one logical desktop.')
+    print('Check visually if KDE uses mixed output scaling.')
+    boxes = []
+    for kind, r in get_boxes(cp, widget):
+        plan = _layout_intent(cp, kind)
         print(f'  {kind.capitalize()}: {r}')
-        if displays:
-            hits = [(intersection(r, m), m) for m in displays]
-            count, mon = max(hits, key=lambda p: p[0])
-            if count == 0:
-                print('    WARNING: this is completely outside the detected monitors.')
-            elif count < r[2] * r[3]:
-                print(f"    WARNING: extends beyond {mon['name']} screen boundaries.")
+        if plan:
+            output, anchor, mx, my = plan
+            mon = by_name.get(output)
+            print(f'    Intended output: {output}; {anchor}; margins {mx}, {my}')
+            if not mon:
+                print('    WARNING: intended output is disconnected or renamed.')
             else:
-                print(f"    Fits within {mon['name']}.")
-    for i, (name_a, a) in enumerate(boxes):
-        for name_b, b in boxes[i+1:]:
+                expected = calculate_position(mon, kind,
+                            cp.getfloat('appearance', kind + '_scale'), anchor, mx, my)
+                if (r[0], r[1]) != expected:
+                    print(f'    WARNING: requested offsets are stale; expected {expected}.')
+                area = intersection(r, mon)
+                if area < r[2] * r[3]:
+                    print('    WARNING: requested window extends outside intended output.')
+                else:
+                    print('    Window rectangle fits intended output (ink unverified).')
+            boxes.append((kind, r, output))
+        elif len(displays) == 1:
+            mon = displays[0]
+            print(f'    ' + ('Fits output window rectangle.' if
+                intersection(r, mon) == r[2]*r[3] else
+                'WARNING: outside the only output window rectangle.'))
+            boxes.append((kind, r, mon['name']))
+        else:
+            print('    No saved layout intent: checking window against detected monitors.')
+            if displays and all(intersection(r, mon) < r[2]*r[3] for mon in displays):
+                print('    WARNING: requested global rectangle fits NO detected output.')
+            boxes.append((kind, r, None))
+    for i, (name_a, a, output_a) in enumerate(boxes):
+        for name_b, b, output_b in boxes[i+1:]:
+            if not output_a or output_a != output_b:
+                continue
             if max(0, min(a[0]+a[2],b[0]+b[2]) - max(a[0],b[0])) * max(
                     0, min(a[1]+a[3],b[1]+b[3]) - max(a[1],b[1])):
-                print(f'  NOTE: {name_a} and {name_b} rectangles overlap.')
-    print('\nSizes are estimates from Conky minimum dimensions, not measurements'
-          ' of Cairo text. For actual X11 window geometry, try `xwininfo` or KWin.')
+                print(f'  NOTE: {name_a} and {name_b} rectangles overlap on {output_a}.')
+    print('\nWindow sizes are shared with Lua configs via widget_geometry.ini.')
+    print('They are not measured Cairo ink bounds; verify rendered glyphs/icons on KDE.')
 
 
 def ask(prompt, default):
@@ -279,55 +313,103 @@ def ask_option(prompt, choices, default):
         print('Choose one of: ' + ', '.join(choices))
 
 
+def _choose_monitor(displays):
+    if len(displays) == 1:
+        return displays[0]
+    print('Outputs: ' + ', '.join(f'{i}={m["name"]}' for i, m in enumerate(displays, 1)))
+    choice = int(ask_option('Intended output number',
+                tuple(str(i) for i in range(1, len(displays)+1)), '1'))
+    return displays[choice-1]
+
+
+def _store_intent(cp, kind, mon, anchor, margin_x, margin_y):
+    if not cp.has_section('layout'):
+        cp.add_section('layout')
+    for suffix, value in (('output', mon['name']), ('anchor', anchor),
+                          ('margin_x', margin_x), ('margin_y', margin_y)):
+        cp['layout'][kind + '_' + suffix] = str(value)
+
+
 def wizard(cp, widget='all'):
     displays, source = monitors()
     show_screens(displays, source)
     if not displays:
-        print('Monitor auto-detection was unavailable.')
+        print('Monitor detection was unavailable.')
         if ask_option('Enter monitor geometry manually now? yes/no', ('yes', 'no'), 'yes') == 'no':
-            print('No changes were made. You may edit [placement] in settings.ini instead.')
+            print('No changes made.')
             return None
         displays = enter_manual_monitors()
         save_manual_monitors(displays)
-        source = 'saved manual geometry'
-    print('\nPlace the selected widget(s) on a monitor. X and Y are calculated.')
-    print('Each of the four widgets can use a different monitor and scale.')
+    print('\nChoose each widget, output, scale and one of the nine anchors.')
+    print('Positions are global X11/XWayland virtual-desktop coordinates.')
     for kind in kinds_for(widget):
-        print('\n' + {'prayer':'PRAYER TIMES', 'date':'DATE / HIJRI', 'weather':'WEATHER', 'sun_moon':'CELESTIAL ASTROLABE'}[kind])
-        index = int(ask_option('Monitor number', [str(i) for i in range(1, len(displays) + 1)], '1'))
-        mon = displays[index - 1]
+        print('\n' + {'prayer':'PRAYER TIMES', 'date':'DATE / HIJRI',
+                       'weather':'WEATHER', 'sun_moon':'CELESTIAL ASTROLABE'}[kind])
+        mon = _choose_monitor(displays)
         old = cp.getfloat('appearance', kind + '_scale')
-        size_mode = ask_option('Size: 1 = keep current, 2 = custom scale, 3 = fit within screen percentage', ('1','2','3'), '1')
+        size_mode = ask_option('Size: 1 = keep, 2 = custom, 3 = fit within percentage',
+                              ('1','2','3'), '1')
         if size_mode == '1':
             scale = old
         elif size_mode == '2':
             scale = ask_number('Scale (1 = original)', old, .3, 3)
         else:
-            width_pct = ask_number('Maximum share of monitor width (%)', 90, 1, 100)
-            height_pct = ask_number('Maximum share of monitor height (%)', 35, 1, 100)
-            base_w, base_h = BASE[kind]
+            width_pct = ask_number('Maximum share of output width (%)', 90, 1, 100)
+            height_pct = ask_number('Maximum share of output height (%)', 35, 1, 100)
+            base_w, base_h = canvas_sizes()[kind]
             fit = min(mon['w'] * width_pct / 100 / base_w,
                       mon['h'] * height_pct / 100 / base_h, 3)
             if fit < .3:
                 print('Requested area is too small; minimum supported scale 0.3 is used.')
             scale = max(.3, math.floor(fit * 1000) / 1000)
         w, h = scaled_size(kind, scale)
-        print(f'Estimated size: {w}x{h} pixels on {mon["name"]}')
-        print('Positions: ' + ', '.join(f'{i}={a}' for i, a in enumerate(ANCHORS, 1)))
-        anchor = ANCHORS[int(ask_option('Position number', [str(i) for i in range(1, 10)],
-                                        '1' if kind in ('date', 'weather', 'sun_moon') else '7')) - 1]
-        margin_x = int(ask_number('Horizontal margin (pixels)', 20, 0, 10000))
-        margin_y = int(ask_number('Vertical margin (pixels)', 20, 0, 10000))
-        x, y = calculate_position(mon, kind, scale, anchor, margin_x, margin_y)
-        if w > mon['w'] or h > mon['h'] or intersection((x,y,w,h), mon) < w*h:
-            print('WARNING: this placement does not fit completely on the monitor.')
+        print(f'Design canvas: {w}x{h} on intended output {mon["name"]}')
+        print('Anchors: ' + ', '.join(f'{i}={a}' for i, a in enumerate(ANCHORS, 1)))
+        anchor = ANCHORS[int(ask_option('Anchor number',
+                        tuple(str(i) for i in range(1, 10)),
+                        '1' if kind in ('date', 'weather', 'sun_moon') else '7')) - 1]
+        mx = int(ask_number('Horizontal margin (logical pixels)', 20, 0, 10000))
+        my = int(ask_number('Vertical margin (logical pixels)', 20, 0, 10000))
+        x, y = calculate_position(mon, kind, scale, anchor, mx, my)
+        if intersection((x, y, w, h), mon) < w*h:
+            print('WARNING: requested Conky window cannot fit at that anchor/margin.')
             if ask_option('Keep this placement? yes/no', ('yes','no'), 'no') == 'no':
-                print('Retaining previous settings for this widget.')
+                print('Previous widget settings retained.')
                 continue
         cp['appearance'][kind + '_scale'] = str(round(scale, 3))
         cp['placement'][kind + '_x'] = str(x)
         cp['placement'][kind + '_y'] = str(y)
-        print(f'Configured {kind}: x={x}, y={y}, scale={scale:.3f}')
+        _store_intent(cp, kind, mon, anchor, mx, my)
+        print(f'Placed {kind}: {mon["name"]} {anchor}: x={x}, y={y}, scale={scale:.3f}')
+    return cp
+
+
+def reflow(cp, widget='all'):
+    """Recalculate global X11 offsets from saved output/anchor/margins."""
+    displays, source = monitors()
+    show_screens(displays, source)
+    if not displays:
+        raise ValueError('No monitors detected; use --manual-screens or check KScreen.')
+    lookup = {m['name']: m for m in displays}
+    updates = {}
+    for kind in kinds_for(widget):
+        plan = _layout_intent(cp, kind)
+        if not plan:
+            raise ValueError(f'{kind}: no saved anchor/output. Run --layout first.')
+        output, anchor, mx, my = plan
+        if output not in lookup:
+            raise ValueError(f'{kind}: intended output {output!r} not found. Run --layout.')
+        scale = cp.getfloat('appearance', kind + '_scale')
+        mon = lookup[output]
+        xy = calculate_position(mon, kind, scale, anchor, mx, my)
+        w, h = scaled_size(kind, scale)
+        if intersection((*xy, w, h), mon) != w*h:
+            raise ValueError(f'{kind}: no longer fits {output}; run --layout.')
+        updates[kind] = xy
+    for kind, (x, y) in updates.items():
+        cp['placement'][kind + '_x'] = str(x)
+        cp['placement'][kind + '_y'] = str(y)
+        print(f'Reflowed {kind}: {x},{y} (global X11/XWayland position)')
     return cp
 
 
@@ -340,42 +422,55 @@ def _profile_path(name):
 def _selected_layout_keys(widget):
     kinds = kinds_for(widget)
     return (('appearance', [kind + '_scale' for kind in kinds]),
-            ('placement', [kind + '_' + axis for kind in kinds for axis in ('x', 'y')]))
+            ('layout', [kind + '_' + attr for kind in kinds
+                        for attr in ('output', 'anchor', 'margin_x', 'margin_y')]))
 
 
 def save_layout(cp, name, widget='all'):
-    """Store selected widget layout; when updating a preset keep the other widget."""
+    """Save declarative layout, not stale, machine-dependent numeric offsets."""
+    for kind in kinds_for(widget):
+        if _layout_intent(cp, kind) is None:
+            raise ValueError(f'{kind}: configure with --layout before saving a preset.')
     path = _profile_path(name)
     LAYOUT_DIR.mkdir(parents=True, exist_ok=True)
     saved = configparser.ConfigParser(interpolation=None)
     if path.exists():
         saved.read(path, encoding='utf-8')
+    # Rebuild, don't retain stale numeric placement keys in an old preset.
+    if saved.has_section('placement'):
+        saved.remove_section('placement')
     for section, keys in _selected_layout_keys(widget):
         if not saved.has_section(section):
             saved.add_section(section)
         for key in keys:
-            saved[section][key] = cp[section][key]
+            if cp.has_option(section, key):
+                saved[section][key] = cp[section][key]
     with path.open('w', encoding='utf-8') as file:
-        file.write('# Conky size/placement only. Location and Athan settings stay unchanged.\n')
+        file.write('# X11/XWayland layout: canvas scale + named output/anchor intent.\n')
         saved.write(file)
     return path
 
 
 def use_layout(cp, name, widget='all'):
+    """Apply an intent preset and resolve new offsets for *current* KScreen."""
     path = _profile_path(name)
     if not path.is_file():
         raise ValueError(f'Layout not found: {name}. Saved layouts: {", ".join(list_layouts()) or "none"}')
     saved = configparser.ConfigParser(interpolation=None)
     saved.read(path, encoding='utf-8')
-    applied = 0
+    for kind in kinds_for(widget):
+        for suffix in ('output', 'anchor', 'margin_x', 'margin_y'):
+            if not saved.has_option('layout', kind + '_' + suffix):
+                raise ValueError(f'Preset {name}: missing {kind}_{suffix}; recreate it with --layout.')
+        if not saved.has_option('appearance', kind + '_scale'):
+            raise ValueError(f'Preset {name}: missing {kind}_scale.')
     for section, keys in _selected_layout_keys(widget):
+        if not cp.has_section(section):
+            cp.add_section(section)
         for key in keys:
             if saved.has_option(section, key):
                 cp[section][key] = saved[section][key]
-                applied += 1
-    if not applied:
-        raise ValueError(f'Layout {name} has no saved settings for {widget}.')
-    return cp
+    return reflow(cp, widget)
 
 
 def list_layouts():
