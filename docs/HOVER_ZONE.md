@@ -127,3 +127,47 @@ deliver coordinates for named-zone hit testing. The offline regression
 seven hitboxes, duplicate suppression, the two/three countdown layout,
 Jumu'ah, and midnight rollover at three scales; it does not substitute for
 live KDE visual verification.
+
+## Astrolabe dial and timeline hover (Task 8)
+
+**Live status (2026-11-23):** The user confirmed that the visible hover markers
+look good and are working on the KDE/XWayland desktop. Their before-sunrise
+and after-sunset positions are covered by offline tests; those specific live
+transitions were not independently observed.
+
+`configs/conky_sun_moon.conf` delivers `lua_mouse_hook = 'on_mouse'` to
+`widgets/Sun_Moon_Astrolabe.lua` with a 0.25-second redraw interval.
+One named `astrolabe` zone contains **two rectangles**: the circular dial
+(including captions) and the 24-hour timeline. Hovering either rectangle
+shows five minimal prayer ticks with `F/D/A/M/I` labels on **both** surfaces.
+Moving the pointer out of the rectangles or leaving the window hides them;
+when idle, the Astrolabe is unchanged. The rectangles are transformed from
+Cairo design coordinates to Conky window pixels using both `sun_moon_scale`
+and the widget's `(18,18)` drawing translation; they are not global monitor
+coordinates.
+
+The Astrolabe reuses `[behavior] hover_failsafe_seconds`, which is already
+validated by `configure.py` and read by the other widgets. The user's current
+XWayland setup uses `0` so **stationary** hover does not time out. A positive
+value intentionally expires hover after that many seconds without a fresh
+mouse event, even if the pointer has not moved. No new setting is needed.
+Revisit the leave-event/failsafe choice when evaluating native Wayland
+(see `NATIVE_WAYLAND_MIGRATION.md`).
+
+The two visualizations use different date semantics on purpose:
+
+- The bar always plots **today's** Fajr, Dhuhr, Asr, Maghrib and Isha on a
+  local-civil-day 0–24h scale, exactly like its moving current-time cursor.
+- The circular **day** arc always plots today's Dhuhr and Asr between today's
+  sunrise and sunset.
+- The circular **night** arc plots the currently represented night: before
+  sunrise that is yesterday's Maghrib/Isha and today's Fajr; after sunrise
+  it is today's Maghrib/Isha and tomorrow's Fajr. Do not put today's Fajr on
+  tonight's arc or use yesterday's Isha for today's 24-hour bar.
+
+`lib/Astrolabe_Prayer_Markers.lua` calculates these positions using cached
+Aladhan timestamps; no network calls occur while drawing. If any required
+cache or solar interval is unavailable/invalid, all five overlay markers are
+suppressed until consistent data is available (the idle dial continues to
+render normally). Test with `texlua tests/test_astrolabe_markers.lua`; real
+KDE legibility and before/after-sunrise hover still need visual verification.

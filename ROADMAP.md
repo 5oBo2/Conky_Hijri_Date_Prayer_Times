@@ -217,7 +217,7 @@ Task 1 (Repo Organization)
 
 ---
 
-### [ ] Task 8: Celestial Astrolabe Hover Micro-Markers (5 Prayers on Dial & 24h Bar)
+### [x] Task 8: Celestial Astrolabe Hover Micro-Markers (5 Prayers on Dial & 24h Bar) — Implemented; Live Appearance User-Verified
 **Goal:** Keep the Celestial Astrolabe minimalist when idle, and on hover reveal subtle micro-markers for all 5 prayers (`Fajr`, `Dhuhr`, `Asr`, `Maghrib`, `Isha`) on **both** the circular dial and the 24h timeline bar.
 
 **Implementation Notes:**
@@ -229,13 +229,15 @@ Task 1 (Repo Organization)
      - **Important Night-Arc Alignment:** For the circular dial, daytime prayers (`sunrise <= ts <= sunset`) map onto the upper semicircle (`PI + PI * (ts - sunrise) / (sunset - sunrise)`). Nighttime prayers (`Maghrib`, `Isha`, `Fajr`) MUST match whichever night interval the dial is currently representing (`yesterday_sunset -> sunrise` before sunrise, or `sunset -> tomorrow_sunrise` after sunrise), mapped onto `0 .. PI`.
      - **24h Timeline Bar (`x = 28, w = 324`):** Map each of today's 5 prayers via `time_fraction(ts)` onto `x + frac * w`.
    - When `hover:visible('astrolabe', now)` is `true`, draw crisp micro-ticks / dots + compact minimal labels (e.g., `F`, `D`, `A`, `M`, `I` or short labels staggered cleanly above/below to avoid collisions) on **both** the circular dial and the 24h timeline bar.
-- **Config evaluation:** Check whether `sun_moon_hover_failsafe_seconds` (or reusing `hover_failsafe_seconds`) is appropriate in `settings.ini` + `configure.py`. Document the decision.
+- **Config evaluation:** Reuse `behavior.hover_failsafe_seconds` (already validated and exposed by `configure.py`); the user's verified XWayland value is `0` so stationary hover lasts until mouse leave/move. No redundant Astrolabe-only key or `settings.ini` modification. If a future native-Wayland backend drops mouse-leave events, revisit under Task 11.
 
 **Acceptance & Verification:**
-- [ ] Idle Astrolabe looks identical to before (no extra clutter).
-- [ ] Hovering over the dial or timeline bar reveals all 5 prayer markers on **both** the circular dial and the 24h bar, positioned accurately relative to Sunrise/Sunset and the current time cursor.
-- [ ] Moving the cursor off the Astrolabe clears the markers cleanly (and respects Wayland failsafe timeout).
-- [ ] Findings & Handoff Log updated.
+- [x] Offline: idle widget draws no prayer markers; no changes to the underlying solar/lunar drawings.
+- [x] Offline: each hover region displays five markers on **both** dial and 24h bar; dial angles are checked against the relevant sunrise/sunset/night interval and bar positions against today's local clock.
+- [x] Offline: pointer movement outside the two regions, `mouse_leave`, stationary hover with `hover_failsafe_seconds = 0`, 1.5x scaling and missing-cache behavior verified.
+- [x] Findings & Handoff Log updated.
+- [x] Live KDE: user confirmed the Astrolabe markers are visually successful and working after applying Task 8 (2026-11-23); Task 8 feature accepted. The offline tests already cover both hover regions and pointer leave.
+- [ ] Extended live verification (non-blocking): observe the actual marker positions before sunrise and after sunset, and check a cache refresh near a day boundary. These cases are covered offline but have not been separately witnessed on KDE.
 
 ---
 
@@ -376,9 +378,13 @@ obsolete backend-specific assumptions instead of supporting parallel layouts.
 - *Verification:* Simulated all five prayer events, Jumu'ah, Sunrise, Midnight, startup/wake guard, dates 13/14/15 and Ramadan styling. Separate-process fake notify-send integration confirmed quoted titles/messages and dedup. Normal widget rendering and layout tests still pass. **Do not mark Task 7 complete until user's live KDE results.**
 
 
-### Task 8 Log
-- *Status:* Pending
-- *Notes:* —
+### Task 8 Log (2026-11-23)
+- *Status:* Implemented and **user-accepted on live KDE** (2026-11-23). User reported "Beautiful, it's working fine" after applying Task 8. Task 7 remains open for its separate scheduled-notification tests.
+- *Files:* `configs/conky_sun_moon.conf`, `widgets/Sun_Moon_Astrolabe.lua`, new `lib/Astrolabe_Prayer_Markers.lua`, new `tests/test_astrolabe_markers.lua`, `docs/HOVER_ZONE.md`, `README.md`, `ROADMAP.md`.
+- *Backend:* Production stays on X11/XWayland with the tested Xlib Cairo surface + double buffering. Enabled `lua_mouse_hook = 'on_mouse'` and 0.25-second redraw for the Astrolabe only. Uses shared named hover state and the existing `hover_failsafe_seconds` setting (the user chose zero to keep stationary hover steady). No `settings.ini` or wizard changes needed.
+- *Correct night arc:* Before today's sunrise, the dial's night interval is **yesterday Maghrib → today Sunrise**: yesterday's Maghrib/Isha + today's Fajr. From today's sunrise onward, the depicted night is **today Maghrib → tomorrow Sunrise**: today's Maghrib/Isha + tomorrow's Fajr. Dhuhr/Asr always follow today's daylight arc. The 24h bar always shows **today's** five prayer timestamps, regardless of which night arc is depicted. These are intentionally different source dates. Don't force today's Fajr onto tonight's arc or previous-night Maghrib onto today's bar. If a required cache/schedule is missing or out of order, suppress the complete 5-marker overlay rather than render misleading positions.
+- *Visual design:* On hover over dial **or** bar, draw five tiny radial ticks/dots with `F/D/A/M/I` near the dial ring and five ticks/labels below the 24h bar. No idle changes. The hitboxes convert the Astrolabe's (18,18) Cairo translation and `sun_moon_scale` into Conky window-pixel mouse coordinates. Draw hook remains non-blocking.
+- *Verification:* `texlua tests/test_astrolabe_markers.lua` passes pre-sunrise/day/night timestamp, cache-unavailable, idle, dial/bar hover, scaling and leave scenarios. Existing seven Lua test suites and sixteen Python unit tests passed. The user has now confirmed the live appearance and functionality. Actual pre-sunrise/after-sunset transitions and cache-day rollover have **not** been individually observed; retain those as optional follow-up verification rather than inventing evidence. No code, layout, settings, backend or autostart changes in this closeout.
 ### Task 9 Log
 - *Status:* Implemented in patch on 2026-11-22; still needs live four-widget profile-switch verification.
 - *Files:* `configure.py`, `install.sh`, `README.md`, `ROADMAP.md`; snapshots created by the user in `profiles/`, not bundled into the patch. The user's active `settings.ini` is untouched.

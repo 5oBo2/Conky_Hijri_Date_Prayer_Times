@@ -10,6 +10,8 @@ local root = base .. '../'
 local Surface = dofile(root .. 'lib/Surface.lua')
 local Weather = dofile(root .. 'lib/Weather_Data.lua')
 local Prayer = dofile(root .. 'lib/Prayer_Data.lua')
+local Hover = dofile(root .. 'lib/Hover_State.lua')
+local Markers = dofile(root .. 'lib/Astrolabe_Prayer_Markers.lua')
 local settings = dofile(root .. 'lib/Settings.lua')
 local SCALE = settings.scale('sun_moon')
 local FONT = settings.get('appearance', 'font', 'DejaVu Sans')
@@ -23,6 +25,27 @@ local BLUE = { 0.388, 0.702, 0.929 }
 local CORAL = { 1.0, 0.522, 0.376 }
 local ROSE = { 0.961, 0.431, 0.510 }
 local last_prayer_ensure = 0
+-- Use the existing suite-wide hover failsafe. The user's XWayland setup
+-- uses 0: a stationary pointer remains active until a leave/move event.
+local hover = Hover.new(settings.number('behavior', 'hover_failsafe_seconds', 0))
+
+function conky_on_mouse(event)
+    return hover:mouse(event, os.time())
+end
+
+local function hover_rectangle(x1, y1, x2, y2)
+    -- Cairo's design-space coordinates are translated by (18,18) AFTER scaling.
+    -- Conky mouse coordinates are window pixels, not Cairo design coordinates.
+    return {(x1 + 18) * SCALE, (y1 + 18) * SCALE,
+            (x2 + 18) * SCALE, (y2 + 18) * SCALE}
+end
+
+local function update_hover_zones()
+    hover:set_zone('astrolabe', {
+        hover_rectangle(24, 19, 356, 307),  -- dial, tick ring and captions
+        hover_rectangle(20, 310, 360, 382), -- 24-hour bar and duration labels
+    })
+end
 
 local function color(cr, c, alpha)
     cairo_set_source_rgba(cr, c[1], c[2], c[3], alpha == nil and 1 or alpha)
@@ -192,6 +215,8 @@ local function sun_schedule(now, weather)
         sunset = events.sunset_label:sub(1, 5),
         sunrise_ts = events.sunrise,
         sunset_ts = events.sunset,
+        yesterday_sunset_ts = events.yesterday_sunset,
+        tomorrow_sunrise_ts = events.tomorrow_sunrise,
         noon = os.date('%H:%M', math.floor((events.sunrise + events.sunset) / 2)),
         midnight = os.date('%H:%M', math.floor((night_start + night_end) / 2)),
         day_seconds = events.sunset - events.sunrise,
@@ -446,11 +471,46 @@ local function draw_timeline(cr, now, schedule)
     cairo_fill(cr)
 end
 
+-- Overlay is drawn only on hover, after the normal dial and timeline.
+-- The five labels remain small and unboxed to preserve the idle design.
+local function draw_dial_prayer_markers(cr, markers)
+    for _, marker in ipairs(markers) do
+        local dx, dy = math.cos(marker.angle), math.sin(marker.angle)
+        local tint = marker.daytime and GOLD or BLUE
+        cairo_set_line_width(cr, 1.3)
+        color(cr, tint, .88)
+        cairo_move_to(cr, CX + (R - 8) * dx, CY + (R - 8) * dy)
+        cairo_line_to(cr, CX + (R + 4) * dx, CY + (R + 4) * dy)
+        cairo_stroke(cr)
+        dot(cr, CX + (R - 8) * dx, CY + (R - 8) * dy, 2.1, tint, .95)
+        text_at(cr, marker.short,
+            CX + (R - 23) * dx, CY + (R - 23) * dy + 3,
+            9.4, WHITE, 'center', true)
+    end
+end
+
+local function draw_bar_prayer_markers(cr, markers)
+    local x, y, w, h = 28, 352, 324, 8
+    for _, marker in ipairs(markers) do
+        local mx = x + marker.bar_fraction * w
+        local tint = marker.daytime and GOLD or BLUE
+        color(cr, tint, .96)
+        cairo_set_line_width(cr, 1.4)
+        cairo_move_to(cr, mx, y - 3)
+        cairo_line_to(cr, mx, y + h + 4)
+        cairo_stroke(cr)
+        dot(cr, mx, y + h / 2, 2.2, tint, .95)
+        text_at(cr, marker.short, mx, y + h + 17, 9.4, WHITE, 'center', true)
+    end
+end
+
 function conky_main()
     if not conky_window then return end
     local now = os.time()
     local weather = Weather.get(now)
     local schedule = sun_schedule(now, weather)
+    update_hover_zones()
+    local markers = hover:visible('astrolabe', now) and Markers.build(now, schedule, Prayer)
     local phase_name, illum_pct, cycle, illum = moon_phase(now)
     local surface = Surface.acquire()
     if not surface then return end
@@ -462,6 +522,10 @@ function conky_main()
     draw_dial(cr, schedule)
     draw_moon(cr, phase_name, illum_pct, cycle, illum, schedule and schedule.day or false)
     draw_timeline(cr, now, schedule)
+    if markers then
+        draw_dial_prayer_markers(cr, markers)
+        draw_bar_prayer_markers(cr, markers)
+    end
     cairo_destroy(cr)
     Surface.release(surface)
 end

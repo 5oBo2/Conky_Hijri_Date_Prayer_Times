@@ -123,9 +123,9 @@ elapsed-time activations. Existing `hover_area` entries are ignored and may be
 deleted from user settings; no new configuration key was added. Restart only Prayer Times after installing.
 
 The geometry and countdown slots are covered by `tests/test_prayer_hover.lua`,
-including three scales. Actual KDE hover behavior and text spacing with your
-installed font still require visual verification. See `docs/HOVER_ZONE.md`
-and ROADMAP Task 6.
+including three scales. The user confirmed the steady live hover behavior and
+the full-column-sized elapsed hotspot above Fajr on KDE on 2026-11-23. See
+`docs/HOVER_ZONE.md` and ROADMAP Task 6.
 
 ## Desktop notifications (Task 7)
 
@@ -443,7 +443,13 @@ prayer and weather workers refresh their location-keyed caches automatically.
 
 - **Prayer + Hijri:** `workers/prayer_fetch.py` uses Aladhan to populate the `CONKY_PRAYER_V2` cache consumed by `lib/Prayer_Data.lua`, including the API's `Lastthird` time (not an estimate calculated in Lua). The Hijri date rolls at Maghrib. **Left-click the seventh Prayer column** to switch its label/time between **Midnight** and **Last 3rd**. The column starts on Midnight at each launch; the post-Isha **Till Midnight** countdown never changes with this toggle. Prayer countdown and hover zones are configured with `elapsed_minutes`, `hover_failsafe_seconds`, `hover_debug_outline`, `hijri_offset_days`, and `athan_enabled`; see `docs/HOVER_ZONE.md` for the mouse-hook diagnostic. On Fedora 45 / Conky 1.24.2 XWayland the user verified that the click toggle works. Setting `update_interval = 0.25` in `configs/conky_prayer_times.conf` (manually, on the installed widget) makes the updated column appear within the next quarter-second refresh, at the cost of four redraws per second. No new setting is needed. Prayer time interpretation expects your system timezone to match the configured location.
 - **Weather:** `weather_fetch.py` uses Open-Meteo without an API key for noncommercial personal use, caching current conditions, sunrise/sunset and tomorrow-through-day-three daily forecast data in `~/.cache/conky-sun-weather/`. Weather remains independent of Date; enabling `date_and_weather` adds a *second* current-weather display and its three-day hover forecast inside Date without suppressing standalone Weather. Unavailable forecast data is omitted instead of showing invented or outdated rows.
-- **Astrolabe:** draws a transparent Sun/Moon dial with lunar phase, night progress and solar schedule from shared caches. It discards weather solar timestamps from a different calendar day (including after sleep/wake), falling back to today's prayer cache or temporarily showing a waiting state until fresh data arrives. The 24-hour bar and lunar phase continue to update. The Astrolabe has no background card; icons for standalone Weather and Date weather are loaded from `assets/weather/`.
+- **Astrolabe:** draws a transparent Sun/Moon dial with lunar phase, night progress and solar schedule from shared caches. It discards weather solar timestamps from a different calendar day (including after sleep/wake), falling back to today's prayer cache or temporarily showing a waiting state until fresh data arrives. The 24-hour bar and lunar phase continue to update. **On hovering either the dial or the 24-hour bar**, five subtle `F/D/A/M/I` prayer ticks and labels appear on **both**, disappearing on mouse leave; the idle display is unchanged. The circular dial's night arc uses yesterday's Maghrib/Isha + today's Fajr before sunrise, or today's Maghrib/Isha + tomorrow's Fajr afterward; the 24h bar always uses today's five prayers. Markers wait for the required cached dates rather than invent times. The Astrolabe reuses `[behavior] hover_failsafe_seconds`; `0` keeps stationary hovering visible on the current XWayland setup. It redraws at 0.25 seconds while running. The Astrolabe has no background card; icons for standalone Weather and Date weather are loaded from `assets/weather/`.
+
+**Task 8 live acceptance (2026-11-23):** The user confirmed the Astrolabe
+hover markers look good and function correctly on KDE. The before-sunrise and
+after-sunset timestamp choices passed offline tests; those specific real-world
+transitions were not separately observed. Task 7 notifications still require
+live verification, and Task 11 native Wayland remains blocked.
 
 Diagnose problems with:
 
