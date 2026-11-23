@@ -149,7 +149,7 @@ Task 1 (Repo Organization)
 - [ ] On live KDE, verify Thursday and Friday Maghrib transitions with actual Aladhan caches, 7-column spacing, and the `ITC Avant Garde Pro XLt` glyphs. The logic is tested offline but the real transition has not yet been observed.
 - [x] Findings & Handoff Log updated. User accepted Task 5 and requested moving to Task 6 (2026-11-23). The rare live Thursday/Friday Maghrib boundary remains a separately tracked verification item, not a blocker for Task 6.
 
-### [ ] Task 6: Prayer Widget Second Hover Zone (Hover Any Prayer for Its Countdown) — Hover Countdowns Working; Elapsed Hotspot Fix Awaits Live Verification
+### [x] Task 6: Prayer Widget Second Hover Zone (Hover Any Prayer for Its Countdown) — Implemented and User-Verified
 **Goal:** Hovering over any prayer column in the main 7-column row temporarily displays `Till <HoveredPrayer>` in the countdown area without disturbing the primary `Till <NextPrayer>` (or post-Fajr/post-Isha secondary timers).
 
 **Behavioral Specification:**
@@ -176,12 +176,12 @@ Task 1 (Repo Organization)
 - [x] Offline: hovering `Dhuhr` after `Isha` (before `Midnight`) displays `Till Fajr` (Col 1), `Till Midnight` (Col 2), and `Till Dhuhr` (Col 3) when the next Dhuhr is Sunday; on Thursday night it correctly says `Till Jumu'ah` for Friday.
 - [x] Offline: hovering an already-visible upcoming or Sunrise/Midnight extra event produces no duplicate countdown; seventh-column hover follows Last 3rd toggle and rollover.
 - [x] Offline: `elapsed_above_fajr` shows `Since <previous>` only from the full-column-sized rectangle above Fajr, not on any prayer column; mouse_leave clears hover, and failsafe zero keeps stationary hover steady; countdown Column 3 fits test windows.
-- [ ] Live KDE: user confirms prayer-column countdowns and failsafe-zero persistence work, but reported elapsed countdown activating over the first two prayer columns; verify corrected Fajr-only hotspot and ensure column countdowns, countdown positions, and click-to-toggle still work.
+- [x] Live KDE: user confirmed working seven-column countdowns, steady stationary hover with `hover_failsafe_seconds = 0`, and the full-column-sized elapsed hotspot above Fajr (2026-11-23).
 - [x] Findings & Handoff Log updated.
 
 ---
 
-### [ ] Task 7: Unified Notification Service + Pre-Prayer Alerts & White Days / Ramadan Fasting Logic
+### [ ] Task 7: Unified Notification Service + Pre-Prayer Alerts & White Days / Ramadan Fasting Logic — Implemented Offline; Live KDE Verification Pending
 **Goal:** Create a shared desktop notification service (`notify-send`) supporting 15-minute pre-event prayer warnings and post-Maghrib Hijri fasting reminders (13, 14, 15), with full Ramadan suppression.
 
 **Implementation Notes:**
@@ -207,12 +207,13 @@ Task 1 (Repo Organization)
   - Check `notify-send` availability in `doctor.py` (warn as `[INFO]`/`[WARN]` if missing, not fatal error).
 
 **Acceptance & Verification:**
-- [ ] `python3 configure.py --check` and interactive wizard validate the new `[behavior]` keys.
-- [ ] `lib/Notify.lua` sends a test `notify-send` once and skips duplicate calls with the same key even across restarts.
-- [ ] Simulated/live test triggers 15-minute warnings for prayer, Sunrise, and Midnight (using `"Jumu'ah"` on Friday).
-- [ ] Simulated Maghrib rollover to day `13`, `14`, `15` sends `"Tomorrow is <day> of <Month>"` when `month ~= 9`, and sends **nothing** when `month == 9` (Ramadan).
-- [ ] Simulated Ramadan `month == 9` renders days `12..15` in `WHITE`, not `RED`.
-- [ ] Findings & Handoff Log updated.
+- [x] `python3 configure.py --check` and interactive wizard validate the new `[behavior]` keys (offline).
+- [x] `lib/Notify.lua` invokes a **fake** `notify-send` once and skips duplicates across separate Lua processes (offline). Live KDE notification appearance remains untested.
+- [x] Simulated 15-minute warnings for all five prayers, Sunrise, Midnight and Friday `"Jumu'ah"`; live timing/desktop display remains untested.
+- [x] Simulated Maghrib rollover for dates 13/14/15, with Ramadan suppression; still requires a live boundary verification.
+- [x] Simulated Ramadan `month == 9` renders days `12..15` in `WHITE`, not `RED`.
+- [x] Findings & Handoff Log updated.
+- [ ] Live KDE: verify actual notifications, restart deduplication, Sunrise/Midnight reminders, Maghrib transitions and Ramadan behavior.
 
 ---
 
@@ -366,9 +367,14 @@ obsolete backend-specific assumptions instead of supporting parallel layouts.
 - *Status:* Pending
 - *Notes:* —
 
-### Task 7 Log
-- *Status:* Pending
-- *Notes:* —
+### Task 7 Log (2026-11-23)
+- *Status:* Implemented and tested offline; KDE notification display and actual calendar transitions remain **unverified**.
+- *Files:* `lib/Notify.lua`, `widgets/Prayer_Times.lua`, `widgets/Hijri_Date.lua`, `settings.ini`, `configure.py`, `doctor.py`, `tests/test_notifications.lua`, `tests/test_notify_service.py`, `docs/NOTIFICATIONS.md`, `README.md`.
+- *Design:* Two independent event paths share one `send_once` API. A notification is sent only when a running widget witnesses a time threshold crossing (cold start, restart or sleep/wake must never backfill stale reminders). Date allows a two-minute cache-arrival grace period only after witnessing Maghrib. No network access or blocking sleeps in the Conky draw hook.
+- *Dedup:* Atomic per-key `mkdir` markers under XDG_CACHE_HOME, plus a non-authoritative `sent.cache` audit log; attempts from multiple Conky instances or after restart are not repeated. `notify-send` title/body arguments are shell-quoted and launched in the background. Old key markers are pruned after 60 days.
+- *Ramadan:* Hijri month 9 suppresses Ayyam al-Bid reminder on 13/14/15 and day-number red highlight on days 12/13/14/15.
+- *Verification:* Simulated all five prayer events, Jumu'ah, Sunrise, Midnight, startup/wake guard, dates 13/14/15 and Ramadan styling. Separate-process fake notify-send integration confirmed quoted titles/messages and dedup. Normal widget rendering and layout tests still pass. **Do not mark Task 7 complete until user's live KDE results.**
+
 
 ### Task 8 Log
 - *Status:* Pending
@@ -439,3 +445,6 @@ obsolete backend-specific assumptions instead of supporting parallel layouts.
 - **User correction:** The first nonoverlapping `elapsed_above_fajr` rectangle was too short. The provided screenshot specifies a box directly above Fajr with roughly the same height and width as a visible prayer name+time column; the rest of Task 6 works and `hover_failsafe_seconds = 0` stopped stationary hover blinking.
 - **Geometry:** Share the measured Fajr column width and prayer-row top/bottom coordinates. The elapsed hotspot has the **same height as one prayer-column hitbox** and sits directly above it with a `3 * prayer_scale` gap; all seven column hitboxes now begin at the visible heading area instead of reaching far into the upper blank space. Keep the elapsed hotspot, all seven prayer zones, and the Midnight click zone independent. The screenshot's approximately 157×85 pixel red box is a **reference at that particular user scale**, not a hardcoded rectangle to paste into other displays/scales.
 - **Regression gate:** Check equal hitbox heights, a nonoverlapping scaled gap, all seven column zones, pointer-leave behavior and scale variants offline. Verify the enlarged hotspot and column-hover behavior in a live KDE session before marking Task 6 complete. No settings, Xlib surface, autostart or layout changes.
+
+### Task 6 User Acceptance (2026-11-23)
+- User confirmed the enlarged elapsed-time hover box above Fajr is working and requested proceeding. Task 6 is now complete; the XWayland hover failsafe remains explicitly configured as `0` in the user's local settings.

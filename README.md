@@ -127,6 +127,46 @@ including three scales. Actual KDE hover behavior and text spacing with your
 installed font still require visual verification. See `docs/HOVER_ZONE.md`
 and ROADMAP Task 6.
 
+## Desktop notifications (Task 7)
+
+Prayer Times and Hijri Date use a shared, non-blocking `notify-send` service
+(`lib/Notify.lua`). They operate on the **same cached Aladhan prayer data** as
+the widgets; no extra network requests or notification daemon are started.
+
+Configure these `[behavior]` settings in `settings.ini` or through
+`python3 configure.py` (shared, all, prayer or date):
+
+```ini
+notifications_enabled = yes
+notify_prayer_minutes = 15
+notify_fasting_days = yes
+```
+
+- Five prayers (Friday's Dhuhr is **Jumu'ah**), Sunrise and Midnight get a
+  reminder as the widget crosses the configured lead-time threshold.
+  `notify_prayer_minutes` accepts `0..60`; **0 disables pre-event reminders**.
+  Sunrise warns that Fajr is ending; Midnight is independent of the seventh
+  column's Midnight / Last 3rd click toggle.
+- A Maghrib rollover to Hijri dates **13, 14, or 15** triggers a White Days
+  (Ayyam al-Bid) fasting reminder for the following daylight period.
+  **Hijri month 9 (Ramadan) suppresses these reminders** and displays dates
+  12–15 in normal white, rather than using the White Days red accent.
+- Cold startup, widget restarts, and large sleep/wake time jumps do **not**
+  backfill missed reminders. Prayer reminders are issued only on the live
+  15-minute threshold crossing. Fasting reminders require the Date widget to
+  witness Maghrib, with two minutes for the next day's cache to arrive.
+  Keep both widget autostart entries running across the transition.
+- Event keys are claimed atomically across processes and persist in
+  `${XDG_CACHE_HOME:-~/.cache}/conky-notifications/sent/`; the companion
+  `sent.cache` records notifications for diagnostics. Old key markers are
+  pruned after 60 days. Clearing this cache resets deduplication.
+
+`python3 doctor.py` reports a warning (not a fatal error) if `notify-send` is
+missing. The actual notification presentation depends on KDE Plasma's
+notification permissions, Do Not Disturb setting, and D-Bus session.
+Restart **Prayer Times and Hijri Date** after changing these settings.
+See `docs/NOTIFICATIONS.md` for test cases and restart semantics.
+
 ## 1. Project setup
 
 Install from the **complete project directory** using `bash install.sh` (see

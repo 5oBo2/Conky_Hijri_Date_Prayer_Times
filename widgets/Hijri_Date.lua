@@ -10,8 +10,13 @@ local Weather = dofile(root .. 'lib/Weather_Data.lua')
 local Weather_Icons = dofile(root .. 'lib/Weather_Icons.lua')
 local settings = dofile(root .. 'lib/Settings.lua')
 local Hover = dofile(root .. 'lib/Hover_State.lua')
+local Notify = dofile(root .. 'lib/Notify.lua')
 
 local SCALE = settings.scale('date')
+local NOTIFY_FASTING = settings.boolean('behavior', 'notifications_enabled', true)
+    and settings.boolean('behavior', 'notify_fasting_days', true)
+local last_date_check
+local fasting_window_end
 local DAYS_ADJUSTMENT = math.floor(settings.number('behavior', 'hijri_offset_days', 0))
 local MONTHS = { 'Muharram', 'Safar', 'Rabi Al Awwal', 'Rabi Al Thani',
     'Jumada Al Oula', 'Jumada Al-Akhira', 'Rajab', 'Shaban',
@@ -35,6 +40,28 @@ local hover = Hover.new(settings.number('behavior', 'date_weather_hover_failsafe
 function conky_on_mouse(event)
     if not DATE_SHOW_WEATHER then return false end
     return hover:mouse(event, os.time())
+end
+
+-- Keep the initial startup after Maghrib silent. Only the live widget
+-- witnessing the Maghrib boundary opens a two-minute grace window for the
+-- next-day prayer/Hijri cache to become available asynchronously.
+local function check_fasting_reminder(now, maghrib, hijri_data, rollover)
+    if NOTIFY_FASTING and maghrib and
+       Notify.crossed(last_date_check, now, maghrib, 120) then
+        fasting_window_end = maghrib + 120
+    end
+    last_date_check = now
+    if not NOTIFY_FASTING or not rollover or not fasting_window_end
+       or now > fasting_window_end or not hijri_data then return end
+    local h = hijri_data.date.hijri
+    local day, month = tonumber(h.day), tonumber(h.month.number)
+    if not day or not month or month == 9 or day < 13 or day > 15
+       or not MONTHS[month] then return end
+    local key = string.format('%s-%02d-%02d:fast', tostring(h.year), month, day)
+    local title = string.format('Tomorrow is %d of %s', day, MONTHS[month])
+    if Notify.send_once(key, title, 'Sunnah fasting reminder (Ayyam al-Bid)', now) then
+        fasting_window_end = nil
+    end
 end
 
 local function text(cr, value, x, y, color)
@@ -263,17 +290,16 @@ function conky_main()
     local now = os.time()
     local actual_today = data_source.shift_date(now, 0)
     local actual_data = data_source.get(actual_today)
-    local rollover = false
-    if actual_data then
-        local maghrib = data_source.timestamp(actual_today, actual_data.timings.Maghrib)
-        rollover = maghrib ~= nil and now >= maghrib
-    end
+    local maghrib = actual_data and
+        data_source.timestamp(actual_today, actual_data.timings.Maghrib)
+    local rollover = maghrib ~= nil and now >= maghrib
     -- Apply date adjustment to the displayed Hijri date, not to Maghrib's clock.
     local hijri_date = data_source.shift_date(now,
         DAYS_ADJUSTMENT + (rollover and 1 or 0))
     data_source.ensure_dates({ actual_today, hijri_date,
         data_source.date_plus(actual_today, 1) }, now)
     local hijri_data = actual_data and data_source.get(hijri_date)
+    check_fasting_reminder(now, maghrib, hijri_data, rollover)
 
     local cs = Surface.acquire()
     if not cs then return end
@@ -316,7 +342,7 @@ function conky_main()
             local x = (conky_window.width - total) / 2
             for i = 1, 3 do
                 text(cr, pieces[i], x, y_hijri,
-                    i == 1 and day >= 12 and day <= 15 and RED or WHITE)
+                    i == 1 and month ~= 9 and day >= 12 and day <= 15 and RED or WHITE)
                 x = x + widths[i] + margin
             end
         end

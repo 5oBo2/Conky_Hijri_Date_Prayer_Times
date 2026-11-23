@@ -89,6 +89,14 @@ def check():
         print(f'[ERROR] Configuration/layout: {exc}')
         problems += 1
 
+    if configure.read().getboolean('behavior', 'notifications_enabled', fallback=True):
+        if shutil.which('notify-send'):
+            print('[OK] notify-send available for desktop reminders')
+        else:
+            print('[WARN] notify-send is missing; notifications will be skipped (non-fatal)')
+    else:
+        print('[INFO] Desktop notifications disabled')
+
     audio = ROOT / 'athan.wav'
     if not audio.is_file():
         audio = ROOT / 'assets/athan.wav'
@@ -100,7 +108,7 @@ def check():
     else:
         print('[INFO] No athan.wav yet: place it at the project root or in assets/')
     required = ('lib/Settings.lua', 'lib/Surface.lua', 'lib/Hover_State.lua',
-                'lib/Prayer_Data.lua', 'lib/Weather_Data.lua',
+                'lib/Prayer_Data.lua', 'lib/Notify.lua', 'lib/Weather_Data.lua',
                 'widgets/Prayer_Times.lua', 'widgets/Hijri_Date.lua',
                 'widgets/Sun_Moon_Astrolabe.lua', 'widgets/Weather.lua',
                 'configs/conky_sun_moon.conf', 'configs/conky_weather.conf',

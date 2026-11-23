@@ -7,8 +7,13 @@ local Surface = dofile(root .. 'lib/Surface.lua')
 local data_source = dofile(root .. 'lib/Prayer_Data.lua')
 local settings = dofile(root .. 'lib/Settings.lua')
 local Hover = dofile(root .. 'lib/Hover_State.lua')
+local Notify = dofile(root .. 'lib/Notify.lua')
 local SCALE = settings.scale('prayer')
 local ENABLE_ATHAN = settings.boolean('behavior', 'athan_enabled', true)
+local NOTIFY_ENABLED = settings.boolean('behavior', 'notifications_enabled', true)
+local NOTIFY_LEAD = settings.number('behavior', 'notify_prayer_minutes', 15) * 60
+assert(NOTIFY_LEAD >= 0 and NOTIFY_LEAD <= 3600,
+    'behavior.notify_prayer_minutes must be between 0 and 60')
 
 local PRAYERS = {'Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'}
 local LABELS = {'Fajr', 'Sunrise', 'Dhuhr', 'Asr', 'Maghrib', 'Isha', 'Midnight'}
@@ -32,6 +37,7 @@ local FONT_LARGE, FONT_SMALL = 50 * SCALE, 20 * SCALE
 local ELAPSED_VISIBLE_SECONDS = math.max(0, settings.number('behavior', 'elapsed_minutes', 60)) * 60
 local hover = Hover.new(settings.number('behavior', 'hover_failsafe_seconds', 5))
 local last_draw_time = nil
+local last_notify_check = nil
 local last_athan_event = nil
 local show_last_third = false
 
@@ -165,6 +171,32 @@ local function check_athan(now, prayers)
     last_draw_time = now
 end
 
+-- A reminder is issued only as the live process crosses the precise
+-- lead-time threshold. A startup/restart inside the window is never treated
+-- as a crossing. Sunrise and Midnight come from the same extra-event schedule
+-- as the visible countdowns; do not substitute Lastthird for Midnight.
+local function check_notifications(now, prayers, extra)
+    if NOTIFY_ENABLED and NOTIFY_LEAD > 0 then
+        local events = {}
+        for _, event in ipairs(prayers) do events[#events + 1] = event end
+        if extra then events[#events + 1] = extra end
+        for _, event in ipairs(events) do
+            local due = event.ts - NOTIFY_LEAD
+            if event.ts > now and Notify.crossed(last_notify_check, now, due, 15) then
+                local name = prayer_display_name(event.name, event.ts)
+                local title = name .. ' in ' .. string.format('%d', NOTIFY_LEAD / 60) .. ' minutes'
+                if name == 'Sunrise' then
+                    title = title .. ' — Fajr ends soon'
+                end
+                local key = os.date('%Y-%m-%d', event.ts) .. ':' ..
+                            event.name .. ':' .. string.format('%d', NOTIFY_LEAD / 60) .. 'm'
+                Notify.send_once(key, title, 'At ' .. os.date('%H:%M', event.ts), now)
+            end
+        end
+    end
+    last_notify_check = now
+end
+
 local function text(cr, value, font_size, x, y, color)
     cairo_set_font_size(cr, font_size)
     cairo_set_source_rgba(cr, color[1], color[2], color[3], color[4])
@@ -188,6 +220,7 @@ function conky_main()
     local now = os.time()
     local today, events, previous, upcoming, extra, dates = schedule(now)
     check_athan(now, events)
+    check_notifications(now, events, extra)
 
     local cs = Surface.acquire()
     if not cs then return end

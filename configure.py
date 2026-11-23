@@ -102,6 +102,11 @@ def validate(cp):
     cp.getboolean("behavior", "hover_debug_outline", fallback=False)
     cp.getint("behavior", "hijri_offset_days")
     cp.getboolean("behavior", "athan_enabled")
+    cp.getboolean("behavior", "notifications_enabled", fallback=True)
+    cp.getboolean("behavior", "notify_fasting_days", fallback=True)
+    minutes = cp.getint("behavior", "notify_prayer_minutes", fallback=15)
+    if not 0 <= minutes <= 60:
+        raise ValueError("notify_prayer_minutes must be between 0 and 60")
     if not 5 <= cp.getint("behavior", "weather_refresh_minutes") <= 180:
         raise ValueError("weather_refresh_minutes must be between 5 and 180")
     for key in ("weather_icon_x", "weather_icon_y"):
@@ -401,6 +406,17 @@ def main():
         change(cp, "location", "school", "Asr school (0 = standard, 1 = Hanafi)")
         change(cp, "location", "midnight_mode", "Midnight convention (0 or 1)")
         change(cp, "appearance", "font", "Font (must be installed)")
+
+    if target in ("all", "shared", "prayer", "date"):
+        # These are suite-wide controls shared by Prayer Times and Date.
+        for key, default in (("notifications_enabled", "yes"),
+                             ("notify_prayer_minutes", "15"),
+                             ("notify_fasting_days", "yes")):
+            cp["behavior"].setdefault(key, default)
+        print("\nDesktop notifications (Prayer Times + Hijri Date)")
+        change(cp, "behavior", "notifications_enabled", "Enable notifications (yes/no)")
+        change(cp, "behavior", "notify_prayer_minutes", "Pre-event reminder lead (0..60 min; 0 disables)")
+        change(cp, "behavior", "notify_fasting_days", "White Days after-Maghrib reminders (yes/no)")
 
     if target in ("all", "prayer"):
         print("\nPrayer widget only")
