@@ -50,7 +50,24 @@ function M.build(now, schedule, prayer)
         Maghrib = timestamp(prayer, night_evening_date, night_evening_data, 'Maghrib'),
         Isha = timestamp(prayer, night_evening_date, night_evening_data, 'Isha'),
     }
+    -- The API attaches Lastthird to the evening's schedule, but its clock
+    -- time occurs AFTER midnight. Resolve it on the following civil date.
+    -- The Islamic last third runs from Lastthird until the NEXT Fajr,
+    -- not sunrise; the dial's entire night half continues to sunrise.
+    local third_start = timestamp(prayer, night_morning_date,
+        night_evening_data, 'Lastthird')
+    local fajr_end = dial_ts.Fajr
+    local last_third
+    if third_start and fajr_end and night_start < third_start
+        and third_start < fajr_end and fajr_end < night_end then
+        last_third = {
+            start_ts = third_start, end_ts = fajr_end,
+            start_angle = PI * fraction(third_start, night_start, night_end),
+            end_angle = PI * fraction(fajr_end, night_start, night_end),
+        }
+    end
     local markers = {}
+    markers.last_third = last_third
     for _, name in ipairs(NAMES) do
         local bar_ts = timestamp(prayer, today, today_data, name)
         local daylight = name == 'Dhuhr' or name == 'Asr'
@@ -75,6 +92,21 @@ function M.build(now, schedule, prayer)
         }
     end
     return markers
+end
+
+-- Match the existing 24-hour bar's .05-day sunrise/sunset transition
+-- windows, normalized onto the actual daylight semicircle of the dial.
+function M.golden_windows(schedule, seconds)
+    if not schedule or not schedule.sunrise_ts or not schedule.sunset_ts
+        or schedule.sunset_ts <= schedule.sunrise_ts then return nil end
+    local span = schedule.sunset_ts - schedule.sunrise_ts
+    local length = math.min(math.max(0, seconds or 0), span / 2)
+    if length == 0 then return nil end
+    local angle = PI * length / span
+    return {
+        {start_angle = PI, end_angle = PI + angle},
+        {start_angle = 2 * PI - angle, end_angle = 2 * PI},
+    }
 end
 
 return M

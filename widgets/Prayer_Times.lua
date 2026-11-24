@@ -20,8 +20,8 @@ local LABELS = { 'Fajr', 'Sunrise', 'Dhuhr', 'Asr', 'Maghrib', 'Isha', 'Midnight
 local HOVER_ZONE_PREFIX = 'prayer_column_'
 local RED = { 200 / 255, 55 / 255, 55 / 255, 200 / 255 }
 local WHITE = { 1, 1, 1, 200 / 255 }
--- Option 05: the upcoming prayer has a colored label and clickable dot.
--- The clock values retain their original WHITE color/opacity.
+-- Option 05: the upcoming prayer has a colored label, time, and clickable dot.
+-- All other clock values retain their original WHITE color/opacity.
 local function parse_hex_color(hex)
     assert(type(hex) == 'string' and hex:match('^#%x%x%x%x%x%x$'),
         'appearance.next_prayer_color must be #RRGGBB (e.g. #efb46f)')
@@ -35,7 +35,7 @@ local FONT = settings.get('appearance', 'font', 'DejaVu Sans')
 local FONT_LARGE, FONT_SMALL = 50 * SCALE, 20 * SCALE
 -- Adjust this ONE number to position the dot horizontally:
 -- larger = farther left, smaller = farther right (0 = clock's right edge).
-local DOT_LEFT_OFFSET = 10 -- unscaled pixels; multiplied by prayer_scale
+local DOT_LEFT_OFFSET = 5 -- unscaled pixels; multiplied by prayer_scale
 local ELAPSED_VISIBLE_SECONDS = math.max(0, settings.number('behavior', 'elapsed_minutes', 60)) * 60
 local hover = Hover.new(settings.number('behavior', 'hover_failsafe_seconds', 5))
 local last_draw_time = nil
@@ -371,7 +371,8 @@ function conky_main()
             end
             text(cr, label, FONT_SMALL, x, y0 - FONT_LARGE,
                 is_next and NEXT_COLOR or WHITE)
-            text(cr, time, FONT_LARGE, x, y0, WHITE)
+            text(cr, time, FONT_LARGE, x, y0,
+                is_next and NEXT_COLOR or WHITE)
         end
 
         if previous and (hover:visible('elapsed_above_fajr', now) or now - previous.ts <= ELAPSED_VISIBLE_SECONDS) then

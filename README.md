@@ -53,18 +53,18 @@ without manually editing X/Y values. If an older profile lacks `[layout]`
 intent, run `--layout --widget all` once instead. Neither command restarts
 Conky; use `python3 restart.py` after validating the result.
 
-## Prayer Times: next-prayer sideline and Jumu'ah (Task 5)
+## Prayer Times: next-prayer highlight and Jumu'ah (Task 5)
 
-The next upcoming prayer is identified using **option 03, “Vertical accent
-line,”** from `isha-highlight-variations.html`: a 3-logical-pixel vertical
-stroke to the left of its column, and the prayer **name only** in warm gold
-(`#efb46f`). All times and the remaining headings retain their original
-white color and opacity. There are no tiles, gradients, additional labels,
-brightness changes to the time, or animations. Sunrise and Midnight / Last
-3rd are informational rather than normal prayer events; tomorrow's Fajr gets
-the accent after Isha if it is the next prayer.
+The next upcoming prayer uses **option 05, the clickable Athan dot**, from
+`isha-highlight-variations.html`. The highlighted prayer's name **and time**
+use `appearance.next_prayer_color` (default warm gold, `#efb46f`). The dot
+sits near the right edge of its clock, with `DOT_LEFT_OFFSET` controlling the
+inset; it changes to the existing widget red when that prayer's Athan is muted.
+All other clock values and headings retain their original white color and
+opacity. Sunrise and Midnight / Last 3rd are informational; tomorrow's Fajr
+gets the accent after Isha if it is the next prayer.
 
-To customize the line **and** label color, optionally add this under
+To customize the dot, label, **and time** color, optionally add this under
 `[appearance]` in your existing `settings.ini`:
 
 ```ini
@@ -150,7 +150,9 @@ notify_fasting_days = yes
 - A Maghrib rollover to Hijri dates **13, 14, or 15** triggers a White Days
   (Ayyam al-Bid) fasting reminder for the following daylight period.
   **Hijri month 9 (Ramadan) suppresses these reminders** and displays dates
-  12–15 in normal white, rather than using the White Days red accent.
+  12–15 in normal white. Outside Ramadan, day **12 alone** is red;
+  **13–15** use the same configured `appearance.next_prayer_color` as the
+  upcoming prayer (default `#efb46f`), without changing their reminders.
 - Cold startup, widget restarts, and large sleep/wake time jumps do **not**
   backfill missed reminders. Prayer reminders are issued only on the live
   15-minute threshold crossing. Fasting reminders require the Date widget to
@@ -443,7 +445,15 @@ prayer and weather workers refresh their location-keyed caches automatically.
 
 - **Prayer + Hijri:** `workers/prayer_fetch.py` uses Aladhan to populate the `CONKY_PRAYER_V2` cache consumed by `lib/Prayer_Data.lua`, including the API's `Lastthird` time (not an estimate calculated in Lua). The Hijri date rolls at Maghrib. **Left-click the seventh Prayer column** to switch its label/time between **Midnight** and **Last 3rd**. The column starts on Midnight at each launch; the post-Isha **Till Midnight** countdown never changes with this toggle. Prayer countdown and hover zones are configured with `elapsed_minutes`, `hover_failsafe_seconds`, `hover_debug_outline`, `hijri_offset_days`, and `athan_enabled`; see `docs/HOVER_ZONE.md` for the mouse-hook diagnostic. On Fedora 45 / Conky 1.24.2 XWayland the user verified that the click toggle works. Setting `update_interval = 0.25` in `configs/conky_prayer_times.conf` (manually, on the installed widget) makes the updated column appear within the next quarter-second refresh, at the cost of four redraws per second. No new setting is needed. Prayer time interpretation expects your system timezone to match the configured location.
 - **Weather:** `weather_fetch.py` uses Open-Meteo without an API key for noncommercial personal use, caching current conditions, sunrise/sunset and tomorrow-through-day-three daily forecast data in `~/.cache/conky-sun-weather/`. Weather remains independent of Date; enabling `date_and_weather` adds a *second* current-weather display and its three-day hover forecast inside Date without suppressing standalone Weather. Unavailable forecast data is omitted instead of showing invented or outdated rows.
-- **Astrolabe:** draws a transparent Sun/Moon dial with lunar phase, night progress and solar schedule from shared caches. It discards weather solar timestamps from a different calendar day (including after sleep/wake), falling back to today's prayer cache or temporarily showing a waiting state until fresh data arrives. The 24-hour bar and lunar phase continue to update. **On hovering either the dial or the 24-hour bar**, five subtle `F/D/A/M/I` prayer ticks and labels appear on **both**, disappearing on mouse leave; the idle display is unchanged. The circular dial's night arc uses yesterday's Maghrib/Isha + today's Fajr before sunrise, or today's Maghrib/Isha + tomorrow's Fajr afterward; the 24h bar always uses today's five prayers. Markers wait for the required cached dates rather than invent times. The Astrolabe reuses `[behavior] hover_failsafe_seconds`; `0` keeps stationary hovering visible on the current XWayland setup. It redraws at 0.25 seconds while running. The Astrolabe has no background card; icons for standalone Weather and Date weather are loaded from `assets/weather/`.
+- **Astrolabe:** draws a transparent Sun/Moon dial with lunar phase, night progress and solar schedule from shared caches. It discards weather solar timestamps from a different calendar day (including after sleep/wake), falling back to today's prayer cache or temporarily showing a waiting state until fresh data arrives. The 24-hour bar and lunar phase continue to update. **Left-click either the dial or the 24-hour bar** to toggle five `F/D/A/M/I` prayer ticks/labels on both surfaces; they persist after mouse leave until clicked again (and reset when Conky restarts). Hover alone does nothing. When prayers are shown, a **magenta arc** on the night dial track marks the last third of the Islamic night from the *cached* `Lastthird` start to **Fajr** (not sunrise). Before sunrise this uses the previous evening's `Lastthird` and today's Fajr; afterward it uses today's `Lastthird` and tomorrow's Fajr. The dial uses the relevant night's Maghrib/Isha; the 24h bar always uses today's five prayers. **Two gold bands** directly on the daylight dial track are visible even without the prayer overlay, matching the bar's existing 5%-of-24-hours (72-minute) sunrise/sunset gradient windows. These are a visual approximation, not solar-elevation-derived photographic golden hours. Prayer markers wait for required cached dates instead of inventing times. `hover_failsafe_seconds` no longer controls Astrolabe prayer visibility. It redraws at 0.25 seconds while running. The Astrolabe has no background card; icons for standalone Weather and Date weather are loaded from `assets/weather/`.
+
+**Dial overlay transparency:** In `widgets/Sun_Moon_Astrolabe.lua`, edit
+`GOLDEN_HOUR_OPACITY = 0.60` for the two gold daylight arcs and
+`LAST_THIRD_OPACITY = 0.60` for the magenta tahajjud arc and its endpoints.
+Both are near the top of the file, use a `0.0` (invisible) to `1.0`
+(fully opaque) range, and also scale their soft glows. These are dial-only
+settings: the 24-hour bar's colors and timing are unchanged. Restart Conky
+with `python3 restart.py` after changing either value.
 
 **Task 8 live acceptance (2026-11-23):** The user confirmed the Astrolabe
 hover markers look good and function correctly on KDE. The before-sunrise and
@@ -490,8 +500,8 @@ The project uses one active configuration schema, without migration scripts or l
 
 ### Upcoming-prayer Athan dot
 
-The highlighted next prayer uses option 05: a small glowing dot beside the
-colored heading (time stays white). Click the dot to mute/unmute the **next**
+The highlighted next prayer uses option 05: a small glowing dot aligned near
+the clock's right edge, with both its heading and time accented. Click the dot to mute/unmute the **next**
 Athan: gold/configured accent = enabled, existing widget red = muted. The mute
 choice resets to enabled as the next prayer becomes upcoming. This is an
 in-memory toggle for the running widget (restarting resets it), not a global

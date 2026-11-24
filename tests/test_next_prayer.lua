@@ -169,7 +169,9 @@ for _, s in ipairs({0.65, 1, 1.5}) do
     gold('Dhuhr')
     white('Fajr')
     white('Asr')
-    white('12:00') -- no brightened time, even for the next prayer
+    gold('12:00') -- upcoming prayer name and time use the configured accent
+    white('15:00')
+    white('06:30') -- Sunrise remains informational, not highlighted
     marker('Dhuhr', '12:00')
 
     -- Regression for the screenshot: after Dhuhr, the countdown reads
@@ -178,6 +180,8 @@ for _, s in ipairs({0.65, 1, 1.5}) do
     expect('Till Asr')
     white('Dhuhr')
     gold('Asr')
+    gold('15:00')
+    white('12:00')
     marker('Asr', '15:00')
 
     -- Before Thursday Maghrib, Thursday's Dhuhr is still Dhuhr.
@@ -187,6 +191,7 @@ for _, s in ipairs({0.65, 1, 1.5}) do
     white('12:00')
     white('Asr')
     gold('Maghrib')
+    gold('17:15')
     marker('Maghrib', '17:15')
 
     -- At the exact Maghrib boundary, the Islamic display day becomes
@@ -198,8 +203,9 @@ for _, s in ipairs({0.65, 1, 1.5}) do
     assert(not entry('Dhuhr') and not entry('12:00'))
     white("Jumu'ah")
     white('12:07')
-    white('18:45')
+    gold('18:45')
     gold('Isha')
+    gold('18:45')
     marker('Isha', '18:45')
     assert_row_fits()
 
@@ -209,7 +215,7 @@ for _, s in ipairs({0.65, 1, 1.5}) do
     expect("Jumu'ah")
     expect('12:07')
     gold('Fajr')
-    white('05:00')
+    gold('05:00')
     marker('Fajr', '05:00')
     run_at(2026, 11, 27, 0, 1)
     expect("Jumu'ah")
@@ -221,7 +227,7 @@ for _, s in ipairs({0.65, 1, 1.5}) do
     expect('Till Jumu\'ah')
     assert(not entry('Dhuhr') and not entry('Till Dhuhr'))
     gold("Jumu'ah")
-    white('12:07')
+    gold('12:07')
     white('Fajr')
     white('Asr')
     marker("Jumu'ah", '12:07')
@@ -231,6 +237,7 @@ for _, s in ipairs({0.65, 1, 1.5}) do
     expect('Since Jumu\'ah')
     white("Jumu'ah")
     gold('Asr')
+    gold('15:00')
     white('12:07')
     marker('Asr', '15:00')
     assert_row_fits()
@@ -244,6 +251,7 @@ for _, s in ipairs({0.65, 1, 1.5}) do
     expect('12:00')
     assert(not entry("Jumu'ah"))
     gold('Isha')
+    gold('18:45')
     marker('Isha', '18:45')
 
     -- The original seventh-column toggle remains intact.
@@ -288,7 +296,8 @@ local dx, dy = (box[1] + box[3]) / 2, (box[2] + box[4]) / 2
 assert(conky_on_mouse({type='button_down', button='left', x=dx, y=dy}))
 run_at(2026, 11, 26, 17, 14)
 assert_color(dots[2].color, 200/255, 55/255, 55/255, 200/255, 'muted dot')
-gold('Maghrib') -- the upcoming label never changes on mute
+gold('Maghrib') -- label and clock stay accented when only the dot is muted
+gold('17:15')
 assert(conky_on_mouse({type='button_down', button='left', x=dx, y=dy}))
 run_at(2026, 11, 26, 17, 14)
 marker('Maghrib', '17:15')
@@ -306,7 +315,8 @@ assert_color(expect("Jumu'ah").color, 0x12 / 255, 0x3a / 255,
              0xbc / 255, 1, 'custom upcoming-prayer label')
 assert_color(dots[2].color, 0x12 / 255, 0x3a / 255,
              0xbc / 255, 1, 'custom marker')
-white('12:07')
+assert_color(expect('12:07').color, 0x12 / 255, 0x3a / 255,
+             0xbc / 255, 1, 'custom upcoming-prayer time')
 
 accent_override = 'not-a-color'
 local ok, err = pcall(function()

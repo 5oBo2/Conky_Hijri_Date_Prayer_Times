@@ -1,5 +1,5 @@
--- Task 8: today's five prayers on the 24h bar, the currently represented
--- night on the dial, and actual Cairo overlay/hover integration.
+-- Today's five prayers on dial/bar: click to toggle overlay, golden windows
+-- always present, and last-third magenta arc from Lastthird until Fajr.
 -- Run: texlua tests/test_astrolabe_markers.lua
 local base = debug.getinfo(1, 'S').source:match('^@(.*/)') or './tests/'
 local root = base .. '../'
@@ -13,12 +13,12 @@ assert(conky.config.double_buffer and conky.config.out_to_x and
 local Markers = real_dofile(root .. 'lib/Astrolabe_Prayer_Markers.lua')
 local prayer = real_dofile(root .. 'lib/Prayer_Data.lua')
 local times = {Fajr='05:00', Sunrise='06:30', Dhuhr='12:00', Asr='15:00',
-    Maghrib='17:15', Isha='18:45'}
+    Maghrib='17:15', Isha='18:45', Lastthird='02:15'}
 local yesterday = {timings={Fajr='05:01', Sunrise='06:31', Dhuhr='12:01',
-    Asr='15:01', Maghrib='17:10', Isha='18:41'}}
+    Asr='15:01', Maghrib='17:10', Isha='18:41', Lastthird='02:12'}}
 local today = {timings=times}
 local tomorrow = {timings={Fajr='05:08', Sunrise='06:32', Dhuhr='12:03',
-    Asr='15:03', Maghrib='17:14', Isha='18:47'}}
+    Asr='15:03', Maghrib='17:14', Isha='18:47', Lastthird='02:21'}}
 local lookup = {
     ['2026-11-22'] = yesterday,
     ['2026-11-23'] = today,
@@ -64,6 +64,21 @@ assert(after[4].dial_ts == ts('2026-11-23', '17:15'))
 assert(after[5].dial_ts == ts('2026-11-23', '18:45'))
 assert(near(after[4].angle, 0))
 assert(after[5].angle < after[1].angle and after[1].angle < math.pi)
+assert(after.last_third.start_ts == ts('2026-11-24', '02:15'),
+    "after sunrise must use today's Lastthird on next civil date")
+assert(after.last_third.end_ts == ts('2026-11-24', '05:08'),
+    'following Fajr ends tahajjud window, never sunrise')
+assert(after.last_third.start_angle > 0 and
+       after.last_third.end_angle > after.last_third.start_angle and
+       after.last_third.end_angle < math.pi)
+local windows = Markers.golden_windows(schedule, 0.05 * 86400)
+assert(#windows == 2)
+assert(near(windows[1].start_angle, math.pi))
+assert(near(windows[1].end_angle, math.pi + math.pi * 4320 /
+       (schedule.sunset_ts - schedule.sunrise_ts)))
+assert(near(windows[2].end_angle, 2 * math.pi))
+assert(near(windows[2].start_angle, 3 * math.pi - windows[1].end_angle))
+assert(not Markers.golden_windows(nil, 4320))
 assert_markers(Markers.build(night, schedule, prayer))
 assert(not Markers.build(afternoon, nil, prayer))
 lookup['2026-11-24'] = nil
@@ -78,8 +93,8 @@ for k,v in pairs(schedule) do broken[k]=v end
 broken.sunset_ts = broken.sunrise_ts
 assert(not Markers.build(afternoon, broken, prayer), 'invalid daylight interval')
 
--- Render the real widget with mock Cairo to verify idle vs hovered paths,
--- exact mouse-coordinate scaling, zone exits and the 5+5 visual markers.
+-- Render with mock Cairo: no reveal on hover, left-click toggles persistently,
+-- both golden arcs always visible, magenta arc only when prayer overlay is on.
 package.preload.cairo = function() return true end
 local function noop() end
 local cfuncs = {
@@ -91,6 +106,24 @@ local cfuncs = {
  'cairo_scale','cairo_translate','cairo_destroy','cairo_rectangle',
 }
 for _, name in ipairs(cfuncs) do _G[name] = noop end
+local arcs, strokes = {}, {}
+local active_arc, active_color
+_G.cairo_set_source_rgba = function(_, r, g, b, alpha)
+    active_color = {r, g, b, alpha}
+end
+_G.cairo_stroke = function()
+    if active_arc then
+        strokes[#strokes + 1] = {arc = active_arc, color = active_color}
+    end
+    active_arc = nil
+end
+_G.cairo_move_to = function() active_arc = nil end
+_G.cairo_line_to = function() active_arc = nil end
+_G.cairo_fill = function() active_arc = nil end
+_G.cairo_arc = function(_, _, _, radius, start_angle, end_angle)
+    active_arc = {r = radius, a = start_angle, b = end_angle}
+    arcs[#arcs + 1] = active_arc
+end
 _G.cairo_create = function() return {} end
 _G.cairo_pattern_create_linear = function() return {} end
 _G.cairo_pattern_create_radial = function() return {} end
@@ -143,25 +176,72 @@ _G.conky_window={width=624,height=648}
 real_dofile(root .. 'widgets/Sun_Moon_Astrolabe.lua')
 local function frame()
     rendered = {}
+    arcs = {}
+    strokes = {}
+    active_arc = nil
+    active_color = nil
     conky_main()
     return marker_labels_at_end()
 end
-assert(frame()==0, 'idle must not draw any prayer marker labels')
--- After scaling 1.5, dial around (190+18,166+18)*1.5.
-conky_on_mouse({type='mouse_enter',x=312,y=276})
-assert(frame()==10, 'hover over dial should render 5 dial and 5 bar labels')
--- Timeline y=(352+18)*1.5, and x=(28+18)*1.5.
-conky_on_mouse({type='mouse_move',x=200,y=555})
-assert(frame()==10, 'timeline hover should reveal both groups')
--- Stationary hover remains visible with failsafe=0.
-now = now + 100
-assert(frame()==10, 'stationary hover must not expire')
+local function count_arcs(radius, a, b)
+    local found = 0
+    for _, arc in ipairs(arcs) do
+        if near(arc.r, radius) and
+           (not a or (near(arc.a, a) and near(arc.b, b))) then
+            found = found + 1
+        end
+    end
+    return found
+end
+local function assert_overlay_opacity(radius, start_angle, end_angle, main_opacity, glow_opacity)
+    local alpha_values = {}
+    for _, s in ipairs(strokes) do
+        if s.arc and s.color and near(s.arc.r, radius) and
+            near(s.arc.a, start_angle) and near(s.arc.b, end_angle) then
+            alpha_values[#alpha_values + 1] = s.color[4]
+        end
+    end
+    assert(#alpha_values == 2, 'overlay needs a translucent main stroke and glow')
+    assert(near(alpha_values[1], glow_opacity), 'soft glow alpha must scale with opacity setting')
+    assert(near(alpha_values[2], main_opacity), 'main stroke alpha must match opacity setting')
+end
+assert(frame()==0, 'idle must not draw prayer labels')
+for _, window in ipairs(windows) do
+    assert(count_arcs(104, window.start_angle, window.end_angle) == 2,
+        'golden band must overlay the daylight dial track, not an inset ring')
+    assert_overlay_opacity(104, window.start_angle, window.end_angle, 0.60, 0.60 * 0.17)
+end
+assert(count_arcs(92) == 0, 'golden bands must not render on an inset ring')
+assert(count_arcs(91) == 0, 'last third must be hidden while idle')
+-- After scaling 1.5, dial center is (190+18,166+18)*1.5.
+assert(conky_on_mouse({type='mouse_enter',x=312,y=276}) == false)
+assert(conky_on_mouse({type='mouse_move',x=312,y=276}) == false)
+assert(frame()==0, 'hover must NOT reveal prayer labels')
+assert(conky_on_mouse({type='button_down',button='right',x=312,y=276}) == false)
+assert(conky_on_mouse({type='button_up',button='left',x=312,y=276}) == false)
+assert(conky_on_mouse({type='button_down',button='left',x=4,y=4}) == false)
+assert(frame()==0, 'right clicks, button_up and outside clicks do not toggle')
+assert(conky_on_mouse({type='button_down',button='left',x=312,y=276}) == true)
+assert(frame()==10, 'left click on dial shows dial and bar prayer markers')
+assert(count_arcs(104, after.last_third.start_angle, after.last_third.end_angle) == 2,
+    'last third must overlay the dial track and end at NEXT Fajr')
+assert_overlay_opacity(104, after.last_third.start_angle, after.last_third.end_angle,
+    0.60, 0.60 * 0.15)
+assert(count_arcs(91) == 0, 'last third must not render on an inset ring')
+for _, window in ipairs(windows) do
+    assert(count_arcs(104, window.start_angle, window.end_angle) == 2,
+        'golden windows remain aligned with dial when prayers shown')
+end
+-- Moving outside and leaving must not clear a click-toggle.
 conky_on_mouse({type='mouse_move',x=10,y=10})
-assert(frame()==0, 'moving outside both hitboxes clears overlay')
-conky_on_mouse({type='mouse_move',x=312,y=276})
-assert(frame()==10)
 conky_on_mouse({type='mouse_leave'})
-assert(frame()==0, 'leaving window clears overlay')
+now = now + 100
+assert(frame()==10, 'click toggled overlay must persist across leave and time')
+-- Timeline y=(352+18)*1.5, and x=(28+18)*1.5.
+assert(conky_on_mouse({type='button_down',button='left',x=200,y=555}) == true)
+assert(frame()==0, 'left click on bar hides both prayer and last-third overlays')
+assert(count_arcs(104, after.last_third.start_angle, after.last_third.end_angle) == 0,
+    'last third disappears when prayer overlay is off')
 -- Hitboxes must use real Conky window coordinates at all common scales.
 for _, scale in ipairs({0.65, 1, 1.5}) do
     render_scale = scale
@@ -169,16 +249,22 @@ for _, scale in ipairs({0.65, 1, 1.5}) do
     real_dofile(root .. 'widgets/Sun_Moon_Astrolabe.lua')
     assert(frame()==0)
     conky_on_mouse({type='mouse_move',x=208*scale,y=184*scale})
-    assert(frame()==10, 'dial zone scale ' .. scale)
-    conky_on_mouse({type='mouse_move',x=200*scale,y=370*scale})
-    assert(frame()==10, 'bar zone scale ' .. scale)
-    conky_on_mouse({type='mouse_move',x=2,y=2})
+    assert(frame()==0, 'hover must not toggle on scale ' .. scale)
+    assert(conky_on_mouse({type='button_down',button='left',x=208*scale,y=184*scale}))
+    assert(frame()==10, 'dial click zone scale ' .. scale)
+    assert(conky_on_mouse({type='button_down',button='left',x=200*scale,y=370*scale}))
+    assert(frame()==0, 'bar click zone scale ' .. scale)
+    assert(not conky_on_mouse({type='button_down',button='left',x=2,y=2}))
     assert(frame()==0, 'outside scaled hitboxes ' .. scale)
 end
--- With no tomorrow cache, hover overlay fails closed but idle still draws.
+-- Missing tomorrow cache suppresses incomplete overlay, keeps golden bands.
 lookup['2026-11-24'] = nil
-conky_on_mouse({type='mouse_move',x=208*render_scale,y=184*render_scale})
-assert(frame()==0, 'missing dates suppress incomplete overlay')
+assert(conky_on_mouse({type='button_down',button='left',x=208*render_scale,y=184*render_scale}))
+assert(frame()==0, 'missing dates suppress incomplete prayer overlay')
+for _, window in ipairs(windows) do
+    assert(count_arcs(104, window.start_angle, window.end_angle) == 2,
+        'golden windows remain independent of prayer cache')
+end
 os.time = real_time
 _G.dofile = real_dofile
-print('PASS: five-prayer dial/bar times, arc alignment, idle/hover/leave, scale and missing data')
+print('PASS: click-only toggle, in-track golden bands and last-third overlay, scales, missing data')

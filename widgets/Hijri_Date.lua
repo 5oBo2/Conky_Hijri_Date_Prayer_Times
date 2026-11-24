@@ -24,6 +24,16 @@ local MONTHS = { 'Muharram', 'Safar', 'Rabi Al Awwal', 'Rabi Al Thani',
 local WHITE = { 1, 1, 1, 200 / 255 }
 local BRIGHT_WHITE = { 1, 1, 1, 0.94 }
 local RED = { 200 / 255, 55 / 255, 55 / 255, 200 / 255 }
+-- Share the upcoming-prayer accent with the three White Days (13–15).
+local function configured_accent()
+    local hex = settings.get('appearance', 'next_prayer_color', '#efb46f')
+    assert(type(hex) == 'string' and hex:match('^#%x%x%x%x%x%x$'),
+        'appearance.next_prayer_color must be #RRGGBB')
+    return {tonumber(hex:sub(2, 3), 16) / 255,
+            tonumber(hex:sub(4, 5), 16) / 255,
+            tonumber(hex:sub(6, 7), 16) / 255, 200 / 255}
+end
+local ACCENT = configured_accent()
 local BLUE = { 0.10, 0.80, 1.0, 1 }
 local ORANGE = { 1, 0.47, 0.19, 1 }
 local FONT = settings.get('appearance', 'font', 'DejaVu Sans')
@@ -341,8 +351,12 @@ function conky_main()
             end
             local x = (conky_window.width - total) / 2
             for i = 1, 3 do
-                text(cr, pieces[i], x, y_hijri,
-                    i == 1 and month ~= 9 and day >= 12 and day <= 15 and RED or WHITE)
+                local day_color = WHITE
+                if i == 1 and month ~= 9 then
+                    if day == 12 then day_color = RED
+                    elseif day >= 13 and day <= 15 then day_color = ACCENT end
+                end
+                text(cr, pieces[i], x, y_hijri, day_color)
                 x = x + widths[i] + margin
             end
         end

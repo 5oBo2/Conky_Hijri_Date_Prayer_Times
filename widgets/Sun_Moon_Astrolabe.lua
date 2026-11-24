@@ -24,26 +24,40 @@ local GOLD = { 1.0, 0.831, 0.439 }
 local BLUE = { 0.388, 0.702, 0.929 }
 local CORAL = { 1.0, 0.522, 0.376 }
 local ROSE = { 0.961, 0.431, 0.510 }
+local MAGENTA = { 0.90, 0.35, 0.84 }
+-- Keep dial golden windows aligned with the bar's +/- .05-day gradient.
+-- The current bar uses 5% of 24 hours = 72 minutes, NOT solar elevation.
+local GOLDEN_WINDOW_SECONDS = 0.05 * 86400
+-- Dial overlay opacity (0 = invisible, 1 = solid). Adjust these two values.
+-- They control both the main stroke and its soft glow; no settings.ini change.
+local GOLDEN_HOUR_OPACITY = 0.50
+local LAST_THIRD_OPACITY = 0.50
+local show_prayers = false
 local last_prayer_ensure = 0
--- Use the existing suite-wide hover failsafe. The user's XWayland setup
--- uses 0: a stationary pointer remains active until a leave/move event.
-local hover = Hover.new(settings.number('behavior', 'hover_failsafe_seconds', 0))
+-- Reuse the existing rectangle hit-testing, but NEVER activate on hover.
+-- A left click on the dial or 24h bar toggles persistent prayer overlays.
+local zones = Hover.new(0)
 
 function conky_on_mouse(event)
-    return hover:mouse(event, os.time())
+    if event and event.type == 'button_down' and event.button == 'left'
+        and zones:contains('astrolabe', event.x, event.y) then
+        show_prayers = not show_prayers
+        return true
+    end
+    return false
 end
 
-local function hover_rectangle(x1, y1, x2, y2)
+local function hit_rectangle(x1, y1, x2, y2)
     -- Cairo's design-space coordinates are translated by (18,18) AFTER scaling.
     -- Conky mouse coordinates are window pixels, not Cairo design coordinates.
-    return {(x1 + 18) * SCALE, (y1 + 18) * SCALE,
-            (x2 + 18) * SCALE, (y2 + 18) * SCALE}
+    return { (x1 + 18) * SCALE, (y1 + 18) * SCALE,
+        (x2 + 18) * SCALE, (y2 + 18) * SCALE }
 end
 
-local function update_hover_zones()
-    hover:set_zone('astrolabe', {
-        hover_rectangle(24, 19, 356, 307),  -- dial, tick ring and captions
-        hover_rectangle(20, 310, 360, 382), -- 24-hour bar and duration labels
+local function update_click_zones()
+    zones:set_zone('astrolabe', {
+        hit_rectangle(24, 19, 356, 307),  -- dial, tick ring and captions
+        hit_rectangle(20, 310, 360, 382), -- 24-hour bar and duration labels
     })
 end
 
@@ -224,6 +238,22 @@ local function sun_schedule(now, weather)
     }
 end
 
+local function draw_golden_windows(cr, schedule)
+    local windows = Markers.golden_windows(schedule, GOLDEN_WINDOW_SECONDS)
+    if not windows then return end
+    for _, window in ipairs(windows) do
+        -- Overlay the golden windows directly on the dial's progress track.
+        cairo_arc(cr, CX, CY, R, window.start_angle, window.end_angle)
+        cairo_set_line_width(cr, 9)
+        color(cr, GOLD, GOLDEN_HOUR_OPACITY * 0.17)
+        cairo_stroke(cr)
+        cairo_arc(cr, CX, CY, R, window.start_angle, window.end_angle)
+        cairo_set_line_width(cr, 3.6)
+        color(cr, GOLD, GOLDEN_HOUR_OPACITY)
+        cairo_stroke(cr)
+    end
+end
+
 local function draw_dial(cr, schedule)
     local day = schedule and schedule.day or false
     local frac = schedule and schedule.fraction or 0
@@ -279,6 +309,9 @@ local function draw_dial(cr, schedule)
             cairo_stroke(cr)
         end
     end
+    -- Always show the morning/evening golden windows, even when prayer
+    -- labels are hidden. The corresponding bar gradient uses the same times.
+    draw_golden_windows(cr, schedule)
     -- Solar noon, computed from the source time data, never hardcoded.
     text_at(cr, 'SOLAR NOON · ' .. (schedule and schedule.noon or '--:--'),
         CX, CY - R - 23, 9.4, MUTED, 'center', true, 1.1)
@@ -445,8 +478,8 @@ local function draw_timeline(cr, now, schedule)
         add_stop(bar, 0, { .118, .169, .282 })
         add_stop(bar, math.max(0, sr - .04), { .220, .243, .447 })
         add_stop(bar, sr, CORAL)
-        add_stop(bar, math.min(1, sr + .05), GOLD)
-        add_stop(bar, math.max(0, ss - .05), GOLD)
+        add_stop(bar, math.min(1, sr + GOLDEN_WINDOW_SECONDS / 86400), GOLD)
+        add_stop(bar, math.max(0, ss - GOLDEN_WINDOW_SECONDS / 86400), GOLD)
         add_stop(bar, ss, ROSE)
         add_stop(bar, math.min(1, ss + .04), { .220, .243, .447 })
         add_stop(bar, 1, { .118, .169, .282 })
@@ -471,8 +504,27 @@ local function draw_timeline(cr, now, schedule)
     cairo_fill(cr)
 end
 
--- Overlay is drawn only on hover, after the normal dial and timeline.
--- The five labels remain small and unboxed to preserve the idle design.
+-- The last third of the Islamic night starts at the API's Lastthird time
+-- and ends at following Fajr. Show it ONLY with the clicked prayer overlay.
+local function draw_last_third(cr, third)
+    if not third then return end
+    -- Use the same radius as the night progress arc, not an inner ring.
+    local r = R
+    cairo_arc(cr, CX, CY, r, third.start_angle, third.end_angle)
+    cairo_set_line_width(cr, 10)
+    color(cr, MAGENTA, LAST_THIRD_OPACITY * 0.15)
+    cairo_stroke(cr)
+    cairo_arc(cr, CX, CY, r, third.start_angle, third.end_angle)
+    cairo_set_line_width(cr, 3.8)
+    color(cr, MAGENTA, LAST_THIRD_OPACITY)
+    cairo_stroke(cr)
+    for _, angle in ipairs({ third.start_angle, third.end_angle }) do
+        dot(cr, CX + r * math.cos(angle), CY + r * math.sin(angle),
+            2.4, MAGENTA, LAST_THIRD_OPACITY)
+    end
+end
+
+-- Click overlay: small unboxed five-prayer labels and the last third arc.
 local function draw_dial_prayer_markers(cr, markers)
     for _, marker in ipairs(markers) do
         local dx, dy = math.cos(marker.angle), math.sin(marker.angle)
@@ -509,8 +561,8 @@ function conky_main()
     local now = os.time()
     local weather = Weather.get(now)
     local schedule = sun_schedule(now, weather)
-    update_hover_zones()
-    local markers = hover:visible('astrolabe', now) and Markers.build(now, schedule, Prayer)
+    update_click_zones()
+    local markers = show_prayers and Markers.build(now, schedule, Prayer)
     local phase_name, illum_pct, cycle, illum = moon_phase(now)
     local surface = Surface.acquire()
     if not surface then return end
@@ -523,6 +575,7 @@ function conky_main()
     draw_moon(cr, phase_name, illum_pct, cycle, illum, schedule and schedule.day or false)
     draw_timeline(cr, now, schedule)
     if markers then
+        draw_last_third(cr, markers.last_third)
         draw_dial_prayer_markers(cr, markers)
         draw_bar_prayer_markers(cr, markers)
     end

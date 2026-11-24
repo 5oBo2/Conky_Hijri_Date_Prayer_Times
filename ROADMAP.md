@@ -454,3 +454,16 @@ obsolete backend-specific assumptions instead of supporting parallel layouts.
 
 ### Task 6 User Acceptance (2026-11-23)
 - User confirmed the enlarged elapsed-time hover box above Fajr is working and requested proceeding. Task 6 is now complete; the XWayland hover failsafe remains explicitly configured as `0` in the user's local settings.
+
+### Astrolabe Click + Dial Windows and Hijri Colors (2026-11-24; offline implemented)
+- **Date:** Outside Ramadan, Hijri 12 remains widget red; 13/14/15 use the optional shared `appearance.next_prayer_color` accent (default `#efb46f`), with existing opacity. Ramadan 12–15 remain white. Fasting notifications are unchanged.
+- **Astrolabe input:** Left click (not hover) on the dial or 24h bar toggles the five prayer labels/ticks. State persists until another click and resets on widget restart; left clicks outside, mouse moves/leaves, and right clicks do nothing. Reuses existing named-zone geometry without introducing a new setting.
+- **Daylight:** Two subtle gold dial bands match the original bar's sunrise-to-(sunrise+5%-of-day) and sunset-5%-of-day-to-sunset windows (72 minutes). The timing is the original bar's stylized gradient, not a computed solar-angle golden hour; `GOLDEN_WINDOW_SECONDS` is in `widgets/Sun_Moon_Astrolabe.lua` if changing both together.
+- **Night:** With the prayer toggle enabled, a magenta night arc covers the cached `Lastthird` time until following **Fajr**, not sunrise. `Lastthird` belongs to the prior evening's Aladhan prayer data but is mapped to the following civil date, using yesterday/today caches before sunrise and today/tomorrow after sunrise. Incomplete/invalid last-third data hides just this arc.
+- **Files:** `widgets/Hijri_Date.lua`, `widgets/Sun_Moon_Astrolabe.lua`, `lib/Astrolabe_Prayer_Markers.lua`, `tests/test_notifications.lua`, `tests/test_astrolabe_markers.lua`, `README.md`, `ROADMAP.md`. Did not modify `settings.ini`, the Cairo renderer, Conky configs or unrelated widgets.
+- **Verification:** All eight executable Lua regression suites (`texlua tests/test_*.lua`) and all sixteen Python `unittest` cases passed; the Astrolabe test covers click-only toggle, both scale-dependent hitboxes, two persistent gold bands, magenta boundaries before and after sunrise, Fajr endpoint and missing cache. Desktop rendering and clicks still need user verification.
+
+### Astrolabe in-track bands and next-prayer clock accent (2026-11-24)
+- Golden-hour bands and the optional last-third arc now use the dial progress radius (`R`), not smaller inset rings. Their timing, colors, and click visibility are unchanged.
+- The upcoming prayer's displayed clock now matches its name and dot in `appearance.next_prayer_color`; all other prayer times remain white. Muting changes only the dot to widget red.
+- Regression tests assert the dial-track radius and accented clock with default/custom colors and after mute.

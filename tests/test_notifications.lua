@@ -39,8 +39,12 @@ end
 local surface = {acquire=function() return {} end, release=function() end}
 local Weather = {get=function() return nil end}
 local Icons = {code=function() return 0 end, draw=function() end}
+local accent_override
 local fake_settings = {
-    get=function(_, name, fallback) return fallback end,
+    get=function(_, name, fallback)
+        if name == 'next_prayer_color' then return accent_override or fallback end
+        return fallback
+    end,
     scale=function() return 1 end,
     date_weather_mode=function() return 'date_only' end,
     boolean=function(_, key, fallback)
@@ -131,7 +135,7 @@ local function run_date(month, day, before, after, expected)
             month == 7 and 'Rajab' or 'Shaban'))
         assert(calls[1].key:find(':fast$',1,false))
     end
-    -- Capture Cairo color for displayed Hijri day: Ramadan must stay WHITE.
+    -- Day 12 is red, days 13-15 share the prayer accent, Ramadan stays white.
     local found
     for _, text in ipairs(captured) do
         if text.text == string.format('%02d', day) then found=text.color end
@@ -139,7 +143,20 @@ local function run_date(month, day, before, after, expected)
     assert(found, 'hijri day was not rendered')
     if month == 9 then
         assert(found[1] == 1 and found[2] == 1 and found[3] == 1,
-            'Ramadan day must not be red')
+            'Ramadan days 12-15 must remain white')
+    elseif day == 12 then
+        assert(math.abs(found[1] - 200/255) < .00001 and
+               math.abs(found[2] - 55/255) < .00001,
+               'only day 12 should be red')
+    else
+        local hex = accent_override or '#efb46f'
+        local r = tonumber(hex:sub(2, 3), 16) / 255
+        local g = tonumber(hex:sub(4, 5), 16) / 255
+        local b = tonumber(hex:sub(6, 7), 16) / 255
+        assert(math.abs(found[1] - r) < .00001 and
+               math.abs(found[2] - g) < .00001 and
+               math.abs(found[3] - b) < .00001,
+            'days 13-15 must use configured prayer accent ' .. hex)
     end
     conky_main(); assert(#calls == expected, 'fasting reminder duplicate')
 end
@@ -155,4 +172,9 @@ run_date(7,12,timestamp(2026,11,23,17,14)+59,
     timestamp(2026,11,23,17,15),0)
 run_date(7,13,timestamp(2026,11,23,17,30),
     timestamp(2026,11,23,17,30)+1,0)
+-- A non-default configured accent must change the date without code changes.
+accent_override = '#1296a5'
+run_date(7,14,timestamp(2026,11,23,17,14)+59,
+    timestamp(2026,11,23,17,15),1)
+accent_override = nil
 print('Task 7: prayer threshold/reminder labels, restart/wake guard, three White Days and Ramadan suppression passed')
