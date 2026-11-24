@@ -21,7 +21,7 @@ class NotificationServiceTests(unittest.TestCase):
             fake.chmod(0o755)
             log = temp / 'notifications.log'
             env = dict(os.environ, XDG_CACHE_HOME=str(temp / 'cache'),
-                       NOTIFY_LOG=str(log), PATH=f'{temp}:{os.environ.get("PATH", "")}')
+                       NOTIFY_LOG=str(log), XDG_DATA_HOME=str(temp / "data"), PATH=f'{temp}:{os.environ.get("PATH", "")}')
             lua = """
                 local N = dofile('lib/Notify.lua')
                 assert(N.crossed(100,101,101,15))
@@ -37,8 +37,12 @@ class NotificationServiceTests(unittest.TestCase):
                 time.sleep(0.02)
             self.assertTrue(log.exists())
             self.assertEqual(log.read_text().splitlines(), [
-                '<--app-name=Conky>', "<Asr's alert>", "<$(touch /tmp/NO_NOTIFY_INJECTION);'hello'>"
+                '<--app-name=Conky Prayer Reminders>', '<--hint=boolean:transient:false>',
+                '<--hint=string:desktop-entry:conky-prayer-reminders>',
+                "<Asr's alert>", "<$(touch /tmp/NO_NOTIFY_INJECTION);'hello'>"
             ])
+            desktop = temp / 'data' / 'applications' / 'conky-prayer-reminders.desktop'
+            self.assertIn('NoDisplay=true', desktop.read_text())
             journal = (temp / 'cache' / 'conky-notifications' / 'sent.cache').read_text()
             self.assertEqual(len(journal.splitlines()), 1)
             self.assertIn('2026-11-23:Asr:15m', journal)

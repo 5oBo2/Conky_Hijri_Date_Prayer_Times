@@ -36,16 +36,15 @@ _G.cairo_set_font_size = function(cr, size) cr._font = size end
 _G.cairo_set_source_rgba = function(cr, r, g, b, a)
     cr._color = {r, g, b, a}
 end
-local lines = {}
-_G.cairo_rectangle = function(cr, x, y, w, h)
-    cr._rectangle = {x = x, y = y, width = w, height = h}
+local dots = {}
+_G.cairo_arc = function(cr, x, y, radius)
+    cr._arc = {x = x, y = y, radius = radius}
 end
 _G.cairo_fill = function(cr)
-    assert(cr._rectangle, 'fill without a rectangle')
-    local r = cr._rectangle
-    lines[#lines + 1] = {x = r.x, y = r.y,
-        width = r.width, height = r.height, color = cr._color}
-    cr._rectangle = nil
+    assert(cr._arc, 'dot fill requires an arc, not a sideline')
+    dots[#dots + 1] = {x = cr._arc.x, y = cr._arc.y,
+        radius = cr._arc.radius, color = cr._color}
+    cr._arc = nil
 end
 local glyph_factor = 0.48 -- deterministic approximation for layout assertions
 _G.cairo_text_extents = function(cr, s, ext)
@@ -106,22 +105,29 @@ local function gold(value)
     assert_color(expect(value).color, 239 / 255, 180 / 255,
                  111 / 255, 1, value)
 end
-local function sideline(column_label)
-    assert(#lines == 1,
-        string.format('expected exactly one sideline for %s, got %d',
-            column_label, #lines))
-    local line = lines[1]
-    assert(math.abs(line.width - 3 * scale) < 0.00001,
-           'sideline width must scale with prayer_scale')
-    assert(line.height > 0, 'sideline must have a positive height')
-    assert(line.x >= 0 and line.x + line.width <= conky_window.width,
-           'sideline outside horizontal window bounds')
-    assert(line.y >= 0 and line.y + line.height <= conky_window.height,
-           'sideline outside vertical window bounds')
+local function marker(column_label, time_text)
+    assert(#dots == 2, 'expected one halo and one filled dot')
+    local dot = dots[2]
+    assert(math.abs(dot.radius - 3.5 * scale) < 0.00001,
+        'dot radius must scale with prayer_scale')
+    assert(dot.x >= 0 and dot.x <= conky_window.width)
+    assert(dot.y >= 0 and dot.y <= conky_window.height)
     local name = expect(column_label)
-    assert(line.x < name.x, 'sideline must be to the left of the label')
-    assert_color(line.color, 239 / 255, 180 / 255, 111 / 255,
-                 1, 'sideline')
+    local clock = expect(time_text)
+    -- Both ends of the same time: label starts at the clock's left edge;
+    -- dot sits a small inset from its right edge, not after the label.
+    assert(math.abs(name.x - clock.x) < 0.00001,
+           'highlight label must start at the left edge of its clock')
+    local clock_right = clock.x + #clock.label * clock.font * glyph_factor
+    assert(math.abs(dot.x - (clock_right - 5 * scale)) < 0.00001,
+           'dot must be inset 5 scaled pixels from the prayer time right edge')
+    local label_right = name.x + #name.label * name.font * glyph_factor
+    assert(dot.x - label_right > 20 * scale,
+           'marker must be far from the label, not just after its text')
+    assert(math.abs(dot.y - (name.y - name.font * 0.5)) < 0.00001,
+           'dot center must share the header line, above the clock')
+    assert_color(dot.color, 239 / 255, 180 / 255, 111 / 255,
+                 1, 'marker dot')
 end
 local function assert_row_fits()
     local left = math.huge
@@ -144,7 +150,7 @@ end
 local function run_at(y, m, d, h, mi)
     now = timestamp(y, m, d, h, mi)
     drawn = {}
-    lines = {}
+    dots = {}
     conky_main()
 end
 -- Run all three scales, including Maghrib boundary and next-day Dhuhr
@@ -161,17 +167,27 @@ for _, s in ipairs({0.65, 1, 1.5}) do
     expect('Till Dhuhr')
     assert(not entry("Jumu'ah"))
     gold('Dhuhr')
+    white('Fajr')
     white('Asr')
     white('12:00') -- no brightened time, even for the next prayer
-    sideline('Dhuhr')
+    marker('Dhuhr', '12:00')
+
+    -- Regression for the screenshot: after Dhuhr, the countdown reads
+    -- 'Till Asr'. Therefore Asr (not Dhuhr) owns the gold label and dot.
+    run_at(2026, 11, 26, 12, 30)
+    expect('Till Asr')
+    white('Dhuhr')
+    gold('Asr')
+    marker('Asr', '15:00')
 
     -- Before Thursday Maghrib, Thursday's Dhuhr is still Dhuhr.
     run_at(2026, 11, 26, 17, 14)
     expect('Dhuhr')
     assert(not entry("Jumu'ah"))
     white('12:00')
+    white('Asr')
     gold('Maghrib')
-    sideline('Maghrib')
+    marker('Maghrib', '17:15')
 
     -- At the exact Maghrib boundary, the Islamic display day becomes
     -- Friday. Use Friday's cached Dhuhr time (12:07) in the third column,
@@ -184,7 +200,7 @@ for _, s in ipairs({0.65, 1, 1.5}) do
     white('12:07')
     white('18:45')
     gold('Isha')
-    sideline('Isha')
+    marker('Isha', '18:45')
     assert_row_fits()
 
     -- Thursday evening and Friday early morning continue displaying
@@ -194,7 +210,7 @@ for _, s in ipairs({0.65, 1, 1.5}) do
     expect('12:07')
     gold('Fajr')
     white('05:00')
-    sideline('Fajr')
+    marker('Fajr', '05:00')
     run_at(2026, 11, 27, 0, 1)
     expect("Jumu'ah")
     expect('12:07')
@@ -208,7 +224,7 @@ for _, s in ipairs({0.65, 1, 1.5}) do
     white('12:07')
     white('Fajr')
     white('Asr')
-    sideline("Jumu'ah")
+    marker("Jumu'ah", '12:07')
     assert_row_fits()
 
     run_at(2026, 11, 27, 12, 30)
@@ -216,7 +232,7 @@ for _, s in ipairs({0.65, 1, 1.5}) do
     white("Jumu'ah")
     gold('Asr')
     white('12:07')
-    sideline('Asr')
+    marker('Asr', '15:00')
     assert_row_fits()
 
     -- Friday Maghrib starts Saturday: Jumu'ah must revert to Dhuhr
@@ -228,7 +244,7 @@ for _, s in ipairs({0.65, 1, 1.5}) do
     expect('12:00')
     assert(not entry("Jumu'ah"))
     gold('Isha')
-    sideline('Isha')
+    marker('Isha', '18:45')
 
     -- The original seventh-column toggle remains intact.
     run_at(2026, 11, 28, 11, 30)
@@ -256,6 +272,30 @@ for _, s in ipairs({0.65, 1, 1.5}) do
     friday_missing = false
 end
 
+-- Click only the marker to mute, click again to unmute, then advance to
+-- another prayer; the next event must default to the configured accent.
+scale = 1
+conky_window = {width = 1111, height = 265}
+assert(loadfile(root .. 'widgets/Prayer_Times.lua'))()
+run_at(2026, 11, 26, 17, 14)
+local active_hover
+for i = 1, 40 do
+    local name, value = debug.getupvalue(conky_on_mouse, i)
+    if name == 'hover' then active_hover = value; break end
+end
+local box = assert(active_hover.zones.next_prayer_athan_dot)[1]
+local dx, dy = (box[1] + box[3]) / 2, (box[2] + box[4]) / 2
+assert(conky_on_mouse({type='button_down', button='left', x=dx, y=dy}))
+run_at(2026, 11, 26, 17, 14)
+assert_color(dots[2].color, 200/255, 55/255, 55/255, 200/255, 'muted dot')
+gold('Maghrib') -- the upcoming label never changes on mute
+assert(conky_on_mouse({type='button_down', button='left', x=dx, y=dy}))
+run_at(2026, 11, 26, 17, 14)
+marker('Maghrib', '17:15')
+assert(conky_on_mouse({type='button_down', button='left', x=dx, y=dy}))
+run_at(2026, 11, 26, 17, 15)
+marker('Isha', '18:45') -- muting Maghrib must not carry over
+
 -- A custom hex color is picked up when Conky reloads the widget.
 accent_override = '#123abc'
 scale = 1
@@ -263,9 +303,9 @@ conky_window = {width = 1111, height = 265}
 assert(loadfile(root .. 'widgets/Prayer_Times.lua'))()
 run_at(2026, 11, 27, 11, 30)
 assert_color(expect("Jumu'ah").color, 0x12 / 255, 0x3a / 255,
-             0xbc / 255, 1, 'custom next-prayer label')
-assert_color(lines[1].color, 0x12 / 255, 0x3a / 255,
-             0xbc / 255, 1, 'custom sideline')
+             0xbc / 255, 1, 'custom upcoming-prayer label')
+assert_color(dots[2].color, 0x12 / 255, 0x3a / 255,
+             0xbc / 255, 1, 'custom marker')
 white('12:07')
 
 accent_override = 'not-a-color'
@@ -276,4 +316,4 @@ assert(not ok and tostring(err):match('appearance%.next_prayer_color'),
        'invalid accent must fail with a clear setting name')
 _G.dofile = real_dofile
 os.time = real_time
-print('Task 5 side-line and Islamic-day boundary verified')
+print('Option 05 dot and Islamic-day boundary verified')

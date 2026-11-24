@@ -25,7 +25,7 @@ _G.cairo_text_extents_t = {create = function() return {} end}
 local noop = function() end
 for _, name in ipairs({'cairo_select_font_face', 'cairo_move_to',
         'cairo_destroy', 'cairo_set_line_width', 'cairo_stroke',
-        'cairo_rectangle', 'cairo_fill'}) do _G[name] = noop end
+        'cairo_arc', 'cairo_rectangle', 'cairo_fill'}) do _G[name] = noop end
 _G.cairo_create = function() return {font = 20} end
 _G.cairo_set_font_size = function(cr, size) cr.font = size end
 _G.cairo_set_source_rgba = noop

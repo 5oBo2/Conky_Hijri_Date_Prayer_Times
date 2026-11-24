@@ -70,6 +70,27 @@ local function prune(now)
     end
 end
 
+-- Plasma retains history more reliably for notifications attributed to a
+-- real desktop entry. Install a tiny, hidden application identity in user
+-- data, without requiring a separate installation step.
+local function ensure_desktop_entry()
+    local data_home = os.getenv('XDG_DATA_HOME')
+    if not data_home or data_home == '' then data_home = home .. '/.local/share' end
+    local dir = data_home .. '/applications'
+    if not success('mkdir -p ' .. shell_quote(dir) .. ' >/dev/null 2>&1') then
+        return false
+    end
+    local path = dir .. '/conky-prayer-reminders.desktop'
+    local existing = io.open(path, 'r')
+    if existing then existing:close(); return true end
+    local f = io.open(path, 'w')
+    if not f then return false end
+    f:write('[Desktop Entry]\nType=Application\nName=Conky Prayer Reminders\n',
+            'Exec=/usr/bin/true\nIcon=appointment-soon\nNoDisplay=true\n')
+    f:close()
+    return true
+end
+
 function M.send_once(key, title, message, now)
     if type(key) ~= 'string' or #key < 1 or #key > 110
        or key:find('[\n\r\t]') then return false end
@@ -91,7 +112,13 @@ function M.send_once(key, title, message, now)
     end
     -- The display command is detached; a slow D-Bus server never blocks a
     -- Conky drawing frame. Shell-quote both dynamic strings (no interpolation).
-    os.execute('notify-send --app-name=Conky ' .. shell_quote(title) .. ' ' ..
+    local identity = ensure_desktop_entry()
+    local args = '--app-name=' .. shell_quote('Conky Prayer Reminders') ..
+        ' --hint=boolean:transient:false'
+    if identity then
+        args = args .. ' --hint=string:desktop-entry:conky-prayer-reminders'
+    end
+    os.execute('notify-send ' .. args .. ' ' .. shell_quote(title) .. ' ' ..
         shell_quote(message) .. ' >/dev/null 2>&1 &')
     return true
 end

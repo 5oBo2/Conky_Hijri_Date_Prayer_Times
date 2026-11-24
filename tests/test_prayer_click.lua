@@ -58,7 +58,7 @@ local function noop() end
 local calls = {
     'cairo_select_font_face', 'cairo_set_font_size', 'cairo_set_source_rgba',
     'cairo_move_to', 'cairo_destroy', 'cairo_rectangle', 'cairo_fill', 'cairo_set_line_width',
-    'cairo_stroke',
+    'cairo_stroke', 'cairo_arc',
 }
 for _, name in ipairs(calls) do _G[name] = noop end
 _G.CAIRO_FONT_SLANT_NORMAL = 0

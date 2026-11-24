@@ -487,3 +487,14 @@ compatibility scripts were removed; the installer also deletes installed copies.
 via `python3 workers/prayer_fetch.py` and `python3 workers/weather_fetch.py`.
 
 The project uses one active configuration schema, without migration scripts or launcher aliases. Named profiles are independent copies of that same schema, not separate per-widget configuration files.
+
+### Upcoming-prayer Athan dot
+
+The highlighted next prayer uses option 05: a small glowing dot beside the
+colored heading (time stays white). Click the dot to mute/unmute the **next**
+Athan: gold/configured accent = enabled, existing widget red = muted. The mute
+choice resets to enabled as the next prayer becomes upcoming. This is an
+in-memory toggle for the running widget (restarting resets it), not a global
+setting; `behavior.athan_enabled=no` still disables all Athan playback.
+
+For KDE Plasma notification history, see `docs/NOTIFICATIONS.md`.

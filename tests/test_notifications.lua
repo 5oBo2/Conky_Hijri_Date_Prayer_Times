@@ -26,6 +26,7 @@ _G.cairo_select_font_face = function() end
 _G.cairo_text_extents = function(_, label, ext) ext.x_advance = #tostring(label) * 18 end
 _G.cairo_move_to = function() end
 _G.cairo_destroy = function() end
+_G.cairo_arc = function() end
 _G.cairo_rectangle = function() end
 _G.cairo_fill = function() end
 _G.cairo_set_line_width = function() end

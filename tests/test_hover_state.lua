@@ -50,7 +50,7 @@ local function noop() end
 local calls = {
     'cairo_select_font_face', 'cairo_set_font_size', 'cairo_set_source_rgba',
     'cairo_move_to', 'cairo_destroy', 'cairo_rectangle', 'cairo_fill', 'cairo_set_line_width',
-    'cairo_stroke', 'cairo_pattern_add_color_stop_rgba', 'cairo_set_source',
+    'cairo_stroke', 'cairo_arc', 'cairo_pattern_add_color_stop_rgba', 'cairo_set_source',
     'cairo_pattern_destroy', 'cairo_save', 'cairo_restore', 'cairo_translate',
     'cairo_scale', 'cairo_set_source_surface', 'cairo_paint', 'cairo_curve_to',
     'cairo_close_path', 'cairo_line_to', 'cairo_set_line_cap', 'cairo_set_line_join',

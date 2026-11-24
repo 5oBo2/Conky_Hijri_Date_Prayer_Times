@@ -78,3 +78,19 @@ Live KDE acceptance still required:
 
 If Conky is upgraded or returned to native Wayland, repeat these acceptance
 tests; this service itself is not supposed to require X11/Xlib.
+
+## Plasma notification history
+
+The sender now creates a hidden `conky-prayer-reminders.desktop` application
+identity in `${XDG_DATA_HOME:-$HOME/.local/share}/applications` on the first
+notification, and sends the `desktop-entry` hint with `transient=false`. This
+helps Plasma associate reminders with an app and retain them in its history
+*after the temporary popup disappears*. Plasma still decides what to store.
+
+In **System Settings → Notifications → Application Settings**, ensure **Show
+in History** is enabled for **Conky Prayer Reminders** (or **Other
+Applications**, if your Plasma version groups it there). Test with a new
+reminder; already missed reminders are not replayed. This does not pin a
+popup on the screen or guarantee history survives user-clearing or system
+retention limits. The `.cache/conky-notifications/sent.cache` file is a
+deduplication audit trail, **not** the Plasma notification center history.

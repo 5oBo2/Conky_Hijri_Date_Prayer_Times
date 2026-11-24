@@ -15,31 +15,44 @@ local NOTIFY_LEAD = settings.number('behavior', 'notify_prayer_minutes', 15) * 6
 assert(NOTIFY_LEAD >= 0 and NOTIFY_LEAD <= 3600,
     'behavior.notify_prayer_minutes must be between 0 and 60')
 
-local PRAYERS = {'Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'}
-local LABELS = {'Fajr', 'Sunrise', 'Dhuhr', 'Asr', 'Maghrib', 'Isha', 'Midnight'}
+local PRAYERS = { 'Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha' }
+local LABELS = { 'Fajr', 'Sunrise', 'Dhuhr', 'Asr', 'Maghrib', 'Isha', 'Midnight' }
 local HOVER_ZONE_PREFIX = 'prayer_column_'
-local RED = {200 / 255, 55 / 255, 55 / 255, 200 / 255}
-local WHITE = {1, 1, 1, 200 / 255}
--- Task 5: option 03 (side line). Only the next prayer's name and the
--- vertical stroke use the accent; every time and other label retains the
--- original WHITE color/opacity. Accept one simple RGB hex setting.
+local RED = { 200 / 255, 55 / 255, 55 / 255, 200 / 255 }
+local WHITE = { 1, 1, 1, 200 / 255 }
+-- Option 05: the upcoming prayer has a colored label and clickable dot.
+-- The clock values retain their original WHITE color/opacity.
 local function parse_hex_color(hex)
     assert(type(hex) == 'string' and hex:match('^#%x%x%x%x%x%x$'),
         'appearance.next_prayer_color must be #RRGGBB (e.g. #efb46f)')
-    return {tonumber(hex:sub(2, 3), 16) / 255,
-            tonumber(hex:sub(4, 5), 16) / 255,
-            tonumber(hex:sub(6, 7), 16) / 255, 1}
+    return { tonumber(hex:sub(2, 3), 16) / 255,
+        tonumber(hex:sub(4, 5), 16) / 255,
+        tonumber(hex:sub(6, 7), 16) / 255, 1 }
 end
 local NEXT_COLOR = parse_hex_color(
     settings.get('appearance', 'next_prayer_color', '#efb46f'))
 local FONT = settings.get('appearance', 'font', 'DejaVu Sans')
 local FONT_LARGE, FONT_SMALL = 50 * SCALE, 20 * SCALE
+-- Adjust this ONE number to position the dot horizontally:
+-- larger = farther left, smaller = farther right (0 = clock's right edge).
+local DOT_LEFT_OFFSET = 10 -- unscaled pixels; multiplied by prayer_scale
 local ELAPSED_VISIBLE_SECONDS = math.max(0, settings.number('behavior', 'elapsed_minutes', 60)) * 60
 local hover = Hover.new(settings.number('behavior', 'hover_failsafe_seconds', 5))
 local last_draw_time = nil
 local last_notify_check = nil
 local last_athan_event = nil
 local show_last_third = false
+local current_upcoming_ts = nil
+local athan_muted_for_upcoming = false
+local MARKER_ZONE = 'next_prayer_athan_dot'
+
+local function set_upcoming(event)
+    local ts = event and event.ts or nil
+    if current_upcoming_ts ~= ts then
+        current_upcoming_ts = ts
+        athan_muted_for_upcoming = false -- each new prayer defaults to enabled
+    end
+end
 
 -- Countdown events refer to the actual civil-day timestamp. Their names
 -- must stay independent of the Islamic-day label shown in the seven-column row.
@@ -66,7 +79,12 @@ end
 -- With lua_mouse_hook = 'on_mouse' in the config, Conky calls this function.
 function conky_on_mouse(event)
     if event.type == 'button_down' and event.button == 'left'
-       and hover:contains('midnight_column', event.x, event.y) then
+        and current_upcoming_ts and hover:contains(MARKER_ZONE, event.x, event.y) then
+        athan_muted_for_upcoming = not athan_muted_for_upcoming
+        return true
+    end
+    if event.type == 'button_down' and event.button == 'left'
+        and hover:contains('midnight_column', event.x, event.y) then
         show_last_third = not show_last_third
         return true -- prevent a click on the desktop/window behind Conky
     end
@@ -75,7 +93,7 @@ end
 
 local function add_event(out, name, date, text)
     local ts = data_source.timestamp(date, text)
-    if ts then out[#out + 1] = {name = name, ts = ts} end
+    if ts then out[#out + 1] = { name = name, ts = ts } end
 end
 
 -- The API attaches its post-midnight night markers to the *previous*
@@ -83,7 +101,7 @@ end
 -- with now. This applies to both Midnight and Lastthird.
 local function night_timestamp(date, times, key)
     local time, maghrib = data_source.minutes(times[key]),
-                          data_source.minutes(times.Maghrib)
+        data_source.minutes(times.Maghrib)
     if not time or not maghrib then return nil end
     local event_date = time < maghrib and data_source.date_plus(date, 1) or date
     return data_source.timestamp(event_date, times[key])
@@ -99,8 +117,10 @@ local function next_hover_event(target, now, dates)
                 and night_timestamp(date, times, target)
                 or data_source.timestamp(date, times[target])
             if ts and ts >= now and (not best or ts < best.ts) then
-                best = {name = target == 'Lastthird' and 'Last 3rd' or target,
-                        ts = ts}
+                best = {
+                    name = target == 'Lastthird' and 'Last 3rd' or target,
+                    ts = ts
+                }
             end
         end
     end
@@ -109,8 +129,8 @@ end
 
 local function schedule(now)
     local today = data_source.shift_date(now, 0)
-    local dates = {today, data_source.shift_date(now, -1),
-                   data_source.shift_date(now, 1)}
+    local dates = { today, data_source.shift_date(now, -1),
+        data_source.shift_date(now, 1) }
     data_source.ensure_dates(dates, now)
     local today_data = data_source.get(today)
     local prayers, extras = {}, {}
@@ -124,12 +144,12 @@ local function schedule(now)
             local fajr = data_source.timestamp(date, times.Fajr)
             local sunrise = data_source.timestamp(date, times.Sunrise)
             if fajr and sunrise and fajr <= now and now < sunrise then
-                extras[#extras + 1] = {name = 'Sunrise', ts = sunrise}
+                extras[#extras + 1] = { name = 'Sunrise', ts = sunrise }
             end
             local isha = data_source.timestamp(date, times.Isha)
             local midnight = night_timestamp(date, times, 'Midnight')
             if isha and midnight and isha <= now and now < midnight then
-                extras[#extras + 1] = {name = 'Midnight', ts = midnight}
+                extras[#extras + 1] = { name = 'Midnight', ts = midnight }
             end
         end
     end
@@ -138,8 +158,11 @@ local function schedule(now)
 
     local previous, upcoming
     for _, prayer in ipairs(prayers) do
-        if prayer.ts <= now then previous = prayer
-        elseif not upcoming then upcoming = prayer end
+        if prayer.ts <= now then
+            previous = prayer
+        elseif not upcoming then
+            upcoming = prayer
+        end
     end
     return today_data, prayers, previous, upcoming, extras[1], dates
 end
@@ -153,17 +176,21 @@ local function check_athan(now, prayers)
     if ENABLE_ATHAN and last_draw_time and now >= last_draw_time and now - last_draw_time <= 120 then
         for _, event in ipairs(prayers) do
             if last_draw_time < event.ts and event.ts <= now
-               and now - event.ts <= 60 and last_athan_event ~= event.ts then
+                and now - event.ts <= 60 and last_athan_event ~= event.ts then
                 last_athan_event = event.ts
-                local audio = root .. 'athan.wav'
-                local f = io.open(audio, 'rb')
-                if not f then
-                    audio = root .. 'assets/athan.wav'
-                    f = io.open(audio, 'rb')
-                end
-                if f then
-                    f:close()
-                    os.execute('paplay ' .. shell_quote(audio) .. ' >/dev/null 2>&1 &')
+                -- Muting applies only to the currently upcoming event.
+                -- Even if muted, claim its timestamp so a redraw cannot replay it.
+                if not (athan_muted_for_upcoming and current_upcoming_ts == event.ts) then
+                    local audio = root .. 'athan.wav'
+                    local f = io.open(audio, 'rb')
+                    if not f then
+                        audio = root .. 'assets/athan.wav'
+                        f = io.open(audio, 'rb')
+                    end
+                    if f then
+                        f:close()
+                        os.execute('paplay ' .. shell_quote(audio) .. ' >/dev/null 2>&1 &')
+                    end
                 end
             end
         end
@@ -189,7 +216,7 @@ local function check_notifications(now, prayers, extra)
                     title = title .. ' — Fajr ends soon'
                 end
                 local key = os.date('%Y-%m-%d', event.ts) .. ':' ..
-                            event.name .. ':' .. string.format('%d', NOTIFY_LEAD / 60) .. 'm'
+                    event.name .. ':' .. string.format('%d', NOTIFY_LEAD / 60) .. 'm'
                 Notify.send_once(key, title, 'At ' .. os.date('%H:%M', event.ts), now)
             end
         end
@@ -207,7 +234,7 @@ end
 local function countdown(cr, prefix, event, now, x, y, alert)
     if not event then return end
     local seconds = math.max(0, (prefix == 'Since ' and now - event.ts)
-                                  or (event.ts - now))
+        or (event.ts - now))
     local hh, mm = data_source.hms(seconds)
     local minute_color = (alert and RED or WHITE)
     text(cr, prefix .. prayer_display_name(event.name, event.ts), FONT_SMALL, x - 10 * SCALE, y, WHITE)
@@ -219,7 +246,10 @@ function conky_main()
     if not conky_window then return end
     local now = os.time()
     local today, events, previous, upcoming, extra, dates = schedule(now)
+    -- Check the event that just became due before advancing the active
+    -- upcoming prayer; otherwise a muted event would be unmuted at its bell.
     check_athan(now, events)
+    set_upcoming(upcoming)
     check_notifications(now, events, extra)
 
     local cs = Surface.acquire()
@@ -230,6 +260,7 @@ function conky_main()
     if not today then
         hover:set_zone('elapsed_above_fajr', nil)
         hover:set_zone('midnight_column', nil)
+        hover:set_zone(MARKER_ZONE, nil)
         for i = 1, #LABELS do hover:set_zone(HOVER_ZONE_PREFIX .. i, nil) end
         text(cr, 'Fetching prayer times...', FONT_SMALL, 20 * SCALE, 110 * SCALE, WHITE)
     else
@@ -256,8 +287,8 @@ function conky_main()
         cairo_text_extents(cr, row_dhuhr_time, extents)
         max_width = math.max(max_width, extents.x_advance)
         cairo_set_font_size(cr, FONT_SMALL)
-        for _, label in ipairs({'Fajr', 'Sunrise', "Jumu'ah", 'Asr',
-                                 'Maghrib', 'Isha', 'Midnight', 'Last 3rd'}) do
+        for _, label in ipairs({ 'Fajr', 'Sunrise', "Jumu'ah", 'Asr',
+            'Maghrib', 'Isha', 'Midnight', 'Last 3rd' }) do
             cairo_text_extents(cr, label, extents)
             max_width = math.max(max_width, extents.x_advance)
         end
@@ -309,42 +340,52 @@ function conky_main()
                 x + max_width + 12 * SCALE, column_bottom,
             })
         end
+        hover:set_zone(MARKER_ZONE, nil)
         for i, name in ipairs(LABELS) do
             local x = x0 + (i - 1) * stride
             local label = name == 'Midnight' and show_last_third and 'Last 3rd'
-                          or name == 'Dhuhr' and dhuhr_label or name
+                or name == 'Dhuhr' and dhuhr_label or name
             local time = name == 'Midnight' and show_last_third and times.Lastthird
-                         or name == 'Dhuhr' and row_dhuhr_time or times[name]
-            -- Match canonical event names. Sunrise and Midnight/Last 3rd
-            -- are informational, not "next prayer" candidates.
+                or name == 'Dhuhr' and row_dhuhr_time or times[name]
+            -- Highlight the *upcoming* prayer, not the previous prayer.
+            -- The label begins at the left of its clock; the dot sits near
+            -- the clock's right edge, inset by DOT_LEFT_OFFSET.
             local is_next = upcoming and upcoming.name == name
             if is_next then
-                -- HTML option 03: one solid sideline, no tile/glow/pill and
-                -- no change to the time's original color or opacity.
-                cairo_set_source_rgba(cr, NEXT_COLOR[1], NEXT_COLOR[2],
-                                      NEXT_COLOR[3], NEXT_COLOR[4])
-                cairo_rectangle(cr, x - 23 * SCALE,
-                    y0 - FONT_LARGE - FONT_SMALL,
-                    3 * SCALE, FONT_LARGE + FONT_SMALL + 6 * SCALE)
+                cairo_set_font_size(cr, FONT_LARGE)
+                cairo_text_extents(cr, time, extents)
+                local cx = x + extents.x_advance - DOT_LEFT_OFFSET * SCALE
+                local cy = y0 - FONT_LARGE - FONT_SMALL * 0.50
+                local tint = athan_muted_for_upcoming and RED or NEXT_COLOR
+                local radius = 3.5 * SCALE
+                cairo_set_source_rgba(cr, tint[1], tint[2], tint[3], 0.18)
+                cairo_arc(cr, cx, cy, radius + 4 * SCALE, 0, 2 * math.pi)
                 cairo_fill(cr)
+                cairo_set_source_rgba(cr, tint[1], tint[2], tint[3], tint[4])
+                cairo_arc(cr, cx, cy, radius, 0, 2 * math.pi)
+                cairo_fill(cr)
+                local hit = 12 * SCALE
+                hover:set_zone(MARKER_ZONE, {
+                    cx - hit, cy - hit, cx + hit, cy + hit,
+                })
             end
-            text(cr, label, FONT_SMALL, x - 10 * SCALE, y0 - FONT_LARGE,
-                 is_next and NEXT_COLOR or WHITE)
+            text(cr, label, FONT_SMALL, x, y0 - FONT_LARGE,
+                is_next and NEXT_COLOR or WHITE)
             text(cr, time, FONT_LARGE, x, y0, WHITE)
         end
 
         if previous and (hover:visible('elapsed_above_fajr', now) or now - previous.ts <= ELAPSED_VISIBLE_SECONDS) then
             local elapsed = now - previous.ts
             countdown(cr, 'Since ', previous, now, x0, 20 * SCALE,
-                      elapsed > 5 * 60 and elapsed < 20 * 60)
+                elapsed > 5 * 60 and elapsed < 20 * 60)
         end
         if upcoming then
             countdown(cr, 'Till ', upcoming, now, x0, y0 + 30 * SCALE,
-                      upcoming.ts - now <= 15 * 60)
+                upcoming.ts - now <= 15 * 60)
         end
         if extra then
             countdown(cr, 'Till ', extra, now, x0 + stride, y0 + 30 * SCALE,
-                      extra.ts - now <= 15 * 60)
+                extra.ts - now <= 15 * 60)
         end
         -- Hovering a different column adds a temporary countdown without
         -- replacing the primary countdown or its Sunrise/Midnight companion.
@@ -354,13 +395,13 @@ function conky_main()
                 local target = (name == 'Midnight' and show_last_third)
                     and 'Lastthird' or name
                 if (not upcoming or target ~= upcoming.name)
-                   and (not extra or target ~= extra.name) then
+                    and (not extra or target ~= extra.name) then
                     local selected = next_hover_event(target, now, dates)
                     if selected then
                         countdown(cr, 'Till ', selected, now,
-                                  x0 + (extra and 2 or 1) * stride,
-                                  y0 + 30 * SCALE,
-                                  selected.ts - now <= 15 * 60)
+                            x0 + (extra and 2 or 1) * stride,
+                            y0 + 30 * SCALE,
+                            selected.ts - now <= 15 * 60)
                     end
                 end
                 break -- at most one hovered prayer countdown
