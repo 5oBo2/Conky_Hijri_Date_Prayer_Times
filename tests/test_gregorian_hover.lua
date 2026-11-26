@@ -133,7 +133,7 @@ draw()
 local idle_date = os.date('%A |  %d %B %Y', now)
 local idle_gregorian = expect(idle_date)
 local idle_hijri = expect('Rajab')
-local idle_clock = expect('1230')
+local idle_clock = expect('12:30')
 local state = get_hover()
 assert(state.zones.gregorian, 'Gregorian hover zone must always be present')
 assert(state.zones.weather == nil, 'weather zone must be absent in date_only mode')
@@ -163,7 +163,7 @@ assert(math.abs(expect('Rajab').y - idle_hijri.y) < 0.001,
     'Gregorian reveal must not move the Hijri row')
 assert(math.abs(expect('Rajab').font - idle_hijri.font) < 0.001,
     'Gregorian reveal must not shrink the Hijri font')
-assert(math.abs(expect('1230').y - idle_clock.y) < 0.001,
+assert(math.abs(expect('12:30').y - idle_clock.y) < 0.001,
     'Gregorian reveal must not move the clock')
 assert(#rectangles == 2, 'Worldline must draw track and progress fill')
 assert(math.abs(rectangles[2].w / rectangles[1].w - 330/365) < 0.002,

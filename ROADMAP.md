@@ -312,15 +312,15 @@ obsolete backend-specific assumptions instead of supporting parallel layouts.
 
 ---
 
-### [ ] Task 13: Whisper Clock Hover — Time, Seconds and Timezone
+### [x] Task 13: Whisper Clock Hover — Implemented; Live Appearance Confirmation Pending
 **Goal:** Add the approved Whisper interaction to the Date widget's clock without changing its idle footprint.
 
 - Keep the large `HH:MM` display. On hover, show smaller live `:SS` immediately to the **right** of the main time, bottom-aligned (not above or below it as a separate row).
-- Show the local timezone abbreviation and UTC offset explicitly; Cairo standard time should read `EET · UTC+02:00`, with daylight-saving time reflected when active (`EEST · UTC+03:00`).
-- Optionally show a discreet live UTC clock in the hover detail, matching the approved V4 concept.
-- Use the system's IANA timezone data / actual local timezone; do not hardcode EET year-round.
-- Reserve the same clock footprint for idle and hover states; no layout shift of the Gregorian or Hijri lines.
-- **Acceptance:** seconds tick live, timezone label and offset match the system at standard/daylight time, and pointer movement does not cause flicker or reposition the widget.
+- Show all timezone context together on one centered line: local abbreviation, UTC offset, IANA timezone identifier (e.g. `Africa/Cairo`), and a discreet live UTC clock.
+- Resolve the IANA identifier from the process `TZ` setting or the system's `/etc/localtime` / `/etc/timezone`; never hardcode Cairo. Lua `os.date` supplies the local abbreviation, offset and live UTC time.
+- Reserve the same clock footprint for idle and hover states; clock details fit inside the existing slot and do not move the Gregorian or Hijri lines.
+- Works in both `date_only` and `date_and_weather` modes. The clock and weather hitboxes remain independent.
+- **Verification:** Regression coverage checks inline/bottom-aligned seconds, the local timezone abbreviation and offset in Cairo standard/daylight time, live UTC time, fixed Gregorian/Hijri positions, and separate clock/weather hover zones. Live KDE appearance confirmation remains pending.
 
 ---
 
@@ -534,3 +534,22 @@ obsolete backend-specific assumptions instead of supporting parallel layouts.
 - **Clipping prevention:** The right column reserves enough width for both top and bottom label pairs. On unusually narrow widgets, the typography scales down uniformly rather than allowing labels to collide or run outside the progress block.
 - **Preserved:** Clock and Hijri row positions and font sizes; Gregorian data, year-progress calculation, weather hover independence, and the Last Third countdown color exception.
 - **Verification:** Regression tests assert the full group center, day-count/progress separation, containment of all four small labels, and the same geometry at 0.65x, 1x, and 1.5x scales.
+
+### Task 13 — Whisper Clock Hover (2026-11-26; offline implemented)
+- **Reveal:** Hovering the Date clock keeps `HH:MM` as the anchor and adds smaller gold `:SS` digits immediately to its right, bottom-aligned. The main digits shrink only during hover so the combined row remains inside the original clock footprint.
+- **Timezone:** One centered line contains the system-local abbreviation, formatted UTC offset, dynamically detected IANA zone ID (e.g. `Africa/Cairo`), and live `UTC HH:MM:SS`. The IANA identifier is resolved from `TZ`, `/etc/localtime`, or `/etc/timezone`; no city is hardcoded. Lua `os.date('%Z')`, `os.date('%z')`, and `os.date('!%H:%M:%S')` supply the live time data, including DST transitions.
+- **Hover integration:** A dedicated `clock` hitbox works in both `date_only` and `date_and_weather`; it does not overlap the Gregorian hitbox or the weather hitbox. The weather interaction remains independent.
+- **Layout:** The clock's original slot is reserved. Gregorian and Hijri baselines and the Worldline layout are unchanged. No new settings or API calls.
+- **Files:** `widgets/Hijri_Date.lua`, `tests/test_clock_hover.lua` (new), `tests/test_gregorian_hover.lua`, `README.md`, and this roadmap.
+- **Verification:** `TZ=Africa/Cairo texlua tests/test_clock_hover.lua` checks EET in November, EEST in July, UTC conversion, inline seconds placement, and independent hitboxes. Gregorian hover regression also passes. Live KDE appearance remains for user confirmation.
+
+#### Task 13 visual refinement — Unified timezone line (2026-11-26)
+- Consolidated abbreviation, UTC offset, IANA timezone ID, and live UTC time onto one centered line beneath the clock.
+- The IANA ID is detected from the `TZ` environment variable, `/etc/localtime` symlink, or `/etc/timezone`; no city/zone string is hardcoded.
+- The line measures its rendered text and scales down only as needed to remain inside the existing clock slot. Gregorian and Hijri positions are unchanged.
+- Regression test runs with both `TZ=Africa/Cairo` and `TZ=Europe/London`, confirming the displayed IANA identifier follows the configured local timezone.
+
+#### Task 13 visual refinement — Metadata baseline alignment (2026-11-26)
+- Raised the single timezone/UTC metadata line from `baseline + 22 * SCALE` to `baseline + 6 * SCALE`, aligning it with the lower clock guide indicated in the user's screenshot.
+- Kept the line's centering, content, font sizing/fit behavior, clock digits, seconds, Gregorian row, and Hijri row unchanged.
+- Added a regression assertion for the raised baseline relative to the main clock line.

@@ -181,6 +181,27 @@ personal files. Save a full configuration profile before changing location,
 appearance or placement (see section 5). All four windows share the selected
 active settings file; location and cache signatures are updated on restart.
 
+## Whisper clock hover
+
+Hover the Date widget's large clock to reveal the approved Whisper details
+inside the clock's existing footprint. The main `HH:MM` remains prominent;
+smaller live `:SS` digits sit immediately to its right and are bottom-aligned.
+One centered metadata line is raised into the clock's lower guide, rather
+than sitting on a separate row beneath it. It shows the host system's local
+timezone abbreviation, current UTC offset, IANA timezone identifier, and a
+discreet live UTC clock. For Cairo this reads, for example,
+`EET · UTC+02:00 · Africa/Cairo · UTC 13:28:13`; during daylight saving the
+abbreviation and offset update automatically.
+
+The IANA ID is resolved from the process `TZ` setting or the system's
+`/etc/localtime` / `/etc/timezone` configuration; no city or timezone is hardcoded.
+
+The reveal uses the same clock hitbox in both `date_only` and
+`date_and_weather` modes. In the latter, clock and weather hover areas remain
+independent. The main time becomes slightly smaller only while hovered so the
+seconds fit inline; the reserved clock area, Gregorian row and Hijri row do
+not move. The clock returns to its original large idle presentation on leave.
+
 ## Gregorian Worldline hover
 
 Hover the Gregorian date row in either `date_only` or `date_and_weather`

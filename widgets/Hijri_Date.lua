@@ -186,6 +186,115 @@ local function draw_gregorian_worldline(cr, now, widget_width, baseline_y, max_w
         right_edge - remaining_ext.x_advance, bottom_y, quiet)
 end
 
+-- Resolve the active IANA timezone from the process environment or the
+-- system timezone configuration. Never bake a city or zone into the widget.
+local function timezone_id_from(value)
+    if type(value) ~= 'string' then return nil end
+    value = value:match('^%s*(.-)%s*$') or ''
+    value = value:gsub('^:', '')
+    local from_path = value:match('/zoneinfo/(.+)$')
+    if from_path then value = from_path end
+    if value:match('^[%w_+%-]+/[%w_+%-/]+$') then return value end
+    if value == 'UTC' or value == 'GMT' then return value end
+    return nil
+end
+
+local function detect_timezone_id()
+    local from_env = timezone_id_from(os.getenv('TZ'))
+    if from_env then return from_env end
+
+    -- On most Linux desktops /etc/localtime is a symlink into zoneinfo.
+    local ok, pipe = pcall(io.popen, 'readlink -f /etc/localtime 2>/dev/null', 'r')
+    if ok and pipe then
+        local path = pipe:read('*l')
+        pipe:close()
+        local from_link = timezone_id_from(path)
+        if from_link then return from_link end
+    end
+
+    -- Debian/Ubuntu and some other distributions keep the zone name here
+    -- even when /etc/localtime is a copied file rather than a symlink.
+    local file = io.open('/etc/timezone', 'r')
+    if file then
+        local configured = file:read('*l')
+        file:close()
+        local from_file = timezone_id_from(configured)
+        if from_file then return from_file end
+    end
+    return 'Local'
+end
+
+local TIMEZONE_ID = detect_timezone_id()
+
+-- Whisper clock reveal. Keep the idle HH:MM footprint reserved while
+-- shrinking the main digits just enough to fit low-aligned seconds inline.
+-- All clock metadata is presented together on one centered line.
+local function draw_clock_reveal(cr, now, idle_size, slot_left, slot_right, baseline)
+    local main = os.date('%H:%M', now)
+    local seconds = ':' .. os.date('%S', now)
+    local main_size = idle_size * 0.78
+    local seconds_size = idle_size * 0.21
+    local main_ext = measure(cr, main, main_size)
+    local seconds_ext = measure(cr, seconds, seconds_size)
+    local row_gap = 4 * SCALE
+    local row_width = main_ext.x_advance + row_gap + seconds_ext.x_advance
+    local slot_width = math.max(0, slot_right - slot_left)
+    local row_x = slot_left + (slot_width - row_width) / 2
+    local main_baseline = baseline - 20 * SCALE
+    local seconds_baseline = main_baseline + main_ext.y_bearing
+        + main_ext.height - seconds_ext.y_bearing - seconds_ext.height
+        - 3 * SCALE
+
+    cairo_set_font_size(cr, main_size)
+    text(cr, main, row_x, main_baseline, WHITE)
+    cairo_set_font_size(cr, seconds_size)
+    text(cr, seconds, row_x + main_ext.x_advance + row_gap,
+        seconds_baseline, ACCENT)
+
+    local zone_name = os.date('%Z', now)
+    if not zone_name or zone_name == '' then zone_name = 'LOCAL' end
+    local raw_offset = os.date('%z', now) or ''
+    local sign, hours, minutes = raw_offset:match('^([+-])(%d%d):?(%d%d)$')
+    local offset = sign and string.format('UTC%s%s:%s', sign, hours, minutes)
+        or 'UTC'
+    local utc_time = os.date('!%H:%M:%S', now)
+
+    local muted = {1, 1, 1, 105 / 255}
+    local details = {
+        {zone_name, ACCENT},
+        {' · ', muted},
+        {offset, WHITE},
+        {' · ', muted},
+        {TIMEZONE_ID, WHITE},
+        {' · UTC ', muted},
+        {utc_time, muted},
+    }
+    local detail_size = 9 * SCALE
+    local available_width = math.max(1, slot_width - 12 * SCALE)
+    local function measure_details(size)
+        local total = 0
+        for _, part in ipairs(details) do
+            part.ext = measure(cr, part[1], size)
+            total = total + part.ext.x_advance
+        end
+        return total
+    end
+    local detail_width = measure_details(detail_size)
+    if detail_width > available_width then
+        detail_size = detail_size * available_width / detail_width
+        detail_width = measure_details(detail_size)
+    end
+
+    local detail_x = slot_left + (slot_width - detail_width) / 2
+    -- Lift the unified timezone line into the clock's lower guide line.
+    local detail_baseline = baseline + 6 * SCALE
+    cairo_set_font_size(cr, detail_size)
+    for _, part in ipairs(details) do
+        text(cr, part[1], detail_x, detail_baseline, part[2])
+        detail_x = detail_x + part.ext.x_advance
+    end
+end
+
 local function draw_divider(cr, x, top_y, bottom_y)
     local pat = cairo_pattern_create_linear(0, top_y, 0, bottom_y)
     cairo_pattern_add_color_stop_rgba(pat, 0.0, 1, 1, 1, 0.0)
@@ -347,6 +456,11 @@ local function draw_date_weather_header(cr, now, clock)
     local div_x = start_x + clock_ext.x_advance + div_gap
     local weather_x = div_x + div_gap
 
+    local clock_right = start_x + clock_ext.x_advance
+    hover:set_zone('clock', {
+        start_x - 8 * SCALE, 0,
+        clock_right + 8 * SCALE, clock_baseline + 29 * SCALE,
+    })
     hover:set_zone('weather', {
         div_x,
         0, -- includes the first forecast row, above the clock numerals
@@ -354,9 +468,14 @@ local function draw_date_weather_header(cr, now, clock)
         clock_baseline + 18 * SCALE,
     })
 
-    -- Clock
-    cairo_set_font_size(cr, DATE_WEATHER_CLOCK_SIZE)
-    text(cr, clock, start_x, clock_baseline, WHITE)
+    -- Clock: the reveal stays within the idle clock's reserved footprint.
+    if hover:visible('clock', now) then
+        draw_clock_reveal(cr, now, DATE_WEATHER_CLOCK_SIZE,
+            start_x, clock_right, clock_baseline)
+    else
+        cairo_set_font_size(cr, DATE_WEATHER_CLOCK_SIZE)
+        text(cr, clock, start_x, clock_baseline, WHITE)
+    end
 
     -- Divider
     draw_divider(cr, div_x, clock_top - 4 * SCALE, clock_baseline + 6 * SCALE)
@@ -411,7 +530,7 @@ function conky_main()
     local ext = cairo_text_extents_t:create()
     cairo_select_font_face(cr, FONT, CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL)
 
-    local clock = os.date('%H%M', now)
+    local clock = os.date('%H:%M', now)
     local gregorian = os.date('%A |  %d %B %Y', now)
     local y_gregorian = FONT_CLOCK + FONT_DATE + (FONT_DATE / 1.5)
     local y_hijri = y_gregorian + FONT_DATE + (FONT_DATE / 3)
@@ -420,9 +539,20 @@ function conky_main()
         draw_date_weather_header(cr, now, clock)
     else
         hover:set_zone('weather', nil)
-        cairo_set_font_size(cr, FONT_CLOCK)
-        text(cr, clock, (conky_window.width - width(cr, clock, ext)) / 2,
-            FONT_CLOCK, WHITE)
+        local clock_ext = measure(cr, clock, FONT_CLOCK)
+        local clock_x = (conky_window.width - clock_ext.x_advance) / 2
+        local clock_right = clock_x + clock_ext.x_advance
+        hover:set_zone('clock', {
+            clock_x - 8 * SCALE, 0,
+            clock_right + 8 * SCALE, FONT_CLOCK + 29 * SCALE,
+        })
+        if hover:visible('clock', now) then
+            draw_clock_reveal(cr, now, FONT_CLOCK,
+                clock_x, clock_right, FONT_CLOCK)
+        else
+            cairo_set_font_size(cr, FONT_CLOCK)
+            text(cr, clock, clock_x, FONT_CLOCK, WHITE)
+        end
     end
 
     local gregorian_ext = measure(cr, gregorian, FONT_DATE)
@@ -433,7 +563,7 @@ function conky_main()
         math.max(math.min(465 * SCALE, worldline_width),
             gregorian_ext.x_advance + 16 * SCALE))
     local zone_left = (conky_window.width - zone_width) / 2
-    local zone_top = math.max(0, y_gregorian - 44 * SCALE)
+    local zone_top = math.max(0, y_gregorian - 36 * SCALE)
     local zone_bottom = math.min(conky_window.height or math.huge,
         y_gregorian + 8 * SCALE)
     hover:set_zone('gregorian', {
