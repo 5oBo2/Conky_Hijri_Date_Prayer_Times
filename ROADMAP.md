@@ -336,14 +336,17 @@ obsolete backend-specific assumptions instead of supporting parallel layouts.
 
 ---
 
-### [ ] Task 15: Hijri Date Hover and Next Islamic Event
-**Goal:** Implement the approved Hijri hover treatment with the month number and next Islamic event.
+### [x] Task 15: Hijri Date Hover and Curated Islamic Events — Implemented; Live KDE Confirmation Pending
+**Goal:** Implement the approved Hijri hover treatment and display only the user's selected major Islamic occasions.
 
-- Preserve the current Hijri date when idle.
-- On hover, reveal the Hijri month number, month name, and Hijri year, plus the next upcoming Islamic event and a countdown when reliable event data is available.
-- Prefer AlAdhan's `nextHijriHoliday` endpoint (or its documented holiday data) rather than inferring event dates from month/day names. Reuse the existing location, request/cache conventions, and avoid blocking the drawing loop.
-- Clearly handle missing, stale, or unavailable event data; never invent an event or countdown. Respect the configured Hijri date adjustment where applicable.
-- **Acceptance:** Verify month numbering, upcoming-event selection across Hijri month/year boundaries, cache expiry/failure behavior, and the hover layout without moving the other date lines.
+- Preserve the current Hijri date when idle. On hover, reveal month number, month name, Hijri year/day, next approved occasion, countdown, and both event dates.
+- The explicit ten-event allowlist is: Islamic New Year (1 Muharram, synthesized), Ashura (10 Muharram), Mawlid al-Nabi (12 Rabi al-Awwal), Isra and Mi'raj (27 Rajab), Laylat al-Bara'at (15 Sha'ban), Ramadan begins (1 Ramadan), Eid al-Fitr (1 Shawwal), Hajj begins (8 Dhul Hijjah), Day of Arafah (9 Dhul Hijjah), and Eid al-Adha (10 Dhul Hijjah).
+- Sacred months (Muharram, Rajab, Dhul Qidah, Dhul Hijjah) are annotated as `HOLY MONTH`; their start/end markers are not countdown events. Individual births, Urs, personal commemorations, historical anniversaries, unlisted API entries and duplicate Hajj/Laylat al-Qadr rows are excluded.
+- During Ramadan, days 20 through the last day are accented; the hover note says one of these nights may be Laylat al-Qadr. No specific night is claimed.
+- Fetch AlAdhan's annual `GET /v1/islamicHolidaysByHijriYear/{year}?calendarMethod=HJCoSA` data for the current and following Hijri years; use `GET /v1/hToG/{DD-MM-YYYY}?calendarMethod=HJCoSA` for a missing fixed-date conversion. Do not use `nextHijriHoliday` for selection because it can return excluded events. Build canonical names from the local allowlist.
+- The selected event is stored in `CONKY_HIJRI_EVENT_V2` with its rule key and base Hijri year. Cache TTL is 12 hours and it is invalidated when the base year changes. The worker receives the displayed date and current Hijri year; comparison respects `hijri_offset_days` and Maghrib rollover.
+- **Policy and future-agent handoff:** `docs/HIJRI_EVENTS.md` is the authoritative catalogue and change procedure. Any new API event must be explicitly approved, added to both the worker's `EVENT_RULES` and Lua's `HIJRI_EVENT_RULES` cache validator, documented, and tested; unknown API entries must never appear automatically.
+- **Verification:** Tests cover the annual endpoint response, HJCoSA validation, allowlist selection, synthetic Islamic New Year, excluded Urs/holy-month markers, next-year rollover, conversion fallback, cache schema/TTL/year invalidation, Ramadan 20–end highlighting, sacred-month annotation, date offset, Maghrib rollover, and independent hover zones. Live KDE appearance remains pending.
 
 ---
 
@@ -519,7 +522,7 @@ obsolete backend-specific assumptions instead of supporting parallel layouts.
 - **Isolation:** Only the month-name piece changes. Existing day-number behavior is unchanged: day 12 red, days 13–15 configured accent outside Ramadan, and days 12–15 white during Ramadan.
 - **Files:** `widgets/Hijri_Date.lua`, `tests/test_notifications.lua`, `README.md`, and this roadmap. No new settings or API calls.
 - **Verification:** The notification/date drawing regression now checks all four sacred months, a non-sacred month, Ramadan, ordinary day-number coloring, and a custom accent. Live KDE rendering remains for user confirmation.
-- **Next:** Task 13 (Whisper Clock Hover), Task 14 (Worldline Gregorian Date Hover), and Task 15 (Hijri Hover / next Islamic event) are queued independently.
+- **Next (when this entry was written):** Tasks 13–15 were queued independently; their completion records follow below.
 
 ### Task 14 — Worldline Gregorian Hover Reference Correction + Last Third Countdown Color Exception (2026-11-26; offline implemented)
 - **Gregorian reveal:** The hover now matches the supplied reference composition: a large configured-accent `day-of-year / year-length` count on the left; a compact block on the right with `YEAR PROGRESS`, percentage, thin progress track, ISO week and days left. The progress block is not stretched across the widget.
@@ -553,3 +556,35 @@ obsolete backend-specific assumptions instead of supporting parallel layouts.
 - Raised the single timezone/UTC metadata line from `baseline + 22 * SCALE` to `baseline + 6 * SCALE`, aligning it with the lower clock guide indicated in the user's screenshot.
 - Kept the line's centering, content, font sizing/fit behavior, clock digits, seconds, Gregorian row, and Hijri row unchanged.
 - Added a regression assertion for the raised baseline relative to the main clock line.
+
+### Task 15 — Hijri Month and Next Islamic Event Hover (2026-11-26; initial V1 implementation; superseded)
+- **Historical note:** The initial V1 implementation used the generic `GET /v1/nextHijriHoliday` endpoint described below. This was later replaced by the curated annual-calendar allowlist documented in `docs/HIJRI_EVENTS.md` and the policy-refinement entry below. Do not reintroduce V1 endpoint selection.
+- **API confirmation (initial implementation):** AlAdhan officially documents `GET /v1/nextHijriHoliday` with `calendarMethod` and optional `adjustment`. The response carries `data.hijri.holidays[]`, `data.hijri.date`, and `data.gregorian.date`. The app initially requested `calendarMethod=HJCoSA`, matching the default Hijri method returned by its existing prayer-times endpoint. The endpoint does not accept a location or timezone.
+- **Background/cache:** Extended `workers/prayer_fetch.py` with `--event` / `--event-force`; it validates the event name and both dates and atomically writes `next-hijri-holiday.cache` (`CONKY_HIJRI_EVENT_V1`) beside prayer-date caches. The cache expires after 12 hours. `lib/Prayer_Data.lua` exposes `get_next_hijri_event` and adds event refresh to the existing non-blocking worker launch. A cached event behind the currently displayed Hijri source date is withheld and refreshed after a one-hour guard.
+- **Date alignment:** The countdown compares the API event's Gregorian date against the exact Gregorian source date used for the currently displayed Hijri date. This naturally includes `hijri_offset_days` and the existing Maghrib rollover; no second offset is applied to the event date. Day differences are computed at local noon and rounded to remain stable across DST changes.
+- **Visual:** The idle Hijri line is unchanged. Hover reveals the numbered month, month name, year/day, a divider, next event label/name, countdown, Gregorian and Hijri event dates. The month index and countdown use configured gold; the event kicker uses muted magenta. The new `hijri` hitbox is independent of clock, Gregorian and weather zones. The layout scales to fit narrow widget widths.
+- **Failure behavior:** Missing, expired or malformed event data displays an explicit unavailable state. A past event is never displayed as upcoming. No API request is made from the drawing loop.
+- **Files:** `workers/prayer_fetch.py`, `lib/Prayer_Data.lua`, `widgets/Hijri_Date.lua`, `tests/test_hijri_event_cache.py` (new), `tests/test_prayer_data_event.lua` (new), `tests/test_hijri_hover.lua` (new), `README.md`, and this roadmap. No settings keys or prayer calculation behavior changed.
+- **Verification:** `python3 -m unittest tests.test_hijri_event_cache -v`; `TZ=Africa/Cairo texlua tests/test_prayer_data_event.lua`; `TZ=Africa/Cairo texlua tests/test_hijri_hover.lua`; plus existing clock, Gregorian and prayer hover regressions. Full-suite verification and patch application are listed in the final handoff. Live KDE rendering remains for user confirmation.
+
+#### Task 15 visual refinement — Event text clipping and honorific glyph (2026-11-26; initial V1 behavior, superseded)
+- **Historical note:** The raw AlAdhan holiday-name normalization and Abu Bakr/Urs rendering described below belonged to the generic V1 endpoint implementation. V2 now uses application-owned ASCII labels and excludes Urs/individual commemorations; the normalization path and its test were removed.
+- Normalized AlAdhan's compact Arabic honorific marker `ر` to `(RA)` (and common related markers) for the Latin-focused Conky font. New worker cache entries normalize diacritics and unsupported glyphs; the renderer also handles already-cached raw markers without waiting for cache expiry.
+- Measured event names and colored metadata against the event column. Overlong text is shortened with an ASCII `...` suffix rather than overflowing the column.
+- Lifted the subtle AlAdhan source/status footer slightly so it remains fully visible below the event metadata without crowding the details.
+- Historical V1 regression coverage included the Abu Bakr marker and ASCII cache normalization; the current V2 tests instead verify canonical ASCII labels, long-name fitting, and widget-edge containment.
+
+### Task 15 policy refinement — Curated Islamic events (2026-11-26)
+- Replaced the generic `/nextHijriHoliday` selection model with a local allowlist. The generic endpoint can return an Urs or another event the user explicitly excluded, so it must not decide what appears.
+- Added ten canonical countdown events, including application-synthesized Islamic New Year on 1 Muharram. The API's event label on that date may be an individual birthday; only the date conversion is reused.
+- Added annual calendar lookup for the current and following HJCoSA Hijri years, with `hToG` fallback for missing fixed-date mappings. Cache schema is `CONKY_HIJRI_EVENT_V2`, with a 12-hour TTL and base-year invalidation.
+- Sacred months are annotated as `HOLY MONTH`, not countdowns. Ramadan days 20 through the final day are accented and carry the uncertainty note for Laylat al-Qadr. Individual births/Urs/personal commemorations, historical anniversaries and unlisted API entries are excluded.
+- Added `docs/HIJRI_EVENTS.md` as the authoritative future-agent handoff. New events require explicit approval, matching `EVENT_RULES` and `HIJRI_EVENT_RULES` entries, documentation and regression tests; never auto-display newly returned API items.
+- **Files:** `workers/prayer_fetch.py`, `lib/Prayer_Data.lua`, `widgets/Hijri_Date.lua`, `tests/test_hijri_event_cache.py`, `tests/test_prayer_data_event.lua`, `tests/test_hijri_hover.lua`, `docs/HIJRI_EVENTS.md`, `README.md`, and `ROADMAP.md`.
+
+#### Task 15 pre-commit hardening — Cache allowlist and V1 cleanup (2026-11-26)
+- Added a second, independent allowlist in `lib/Prayer_Data.lua`. The cache reader now rejects unknown event keys and any canonical name or Hijri month/day that does not match the approved rule, even if a malformed cache is written outside the worker.
+- Kept the Python worker allowlist and Lua cache-validation allowlist intentionally synchronized; `docs/HIJRI_EVENTS.md` now tells future agents to update both.
+- Removed the V1 raw Arabic honorific normalization path from `widgets/Hijri_Date.lua` and replaced the old Urs/honorific rendering fixture with a canonical `Isra and Mi'raj` label. Added Lua cache tests proving excluded Urs and mismatched key/name/date records are rejected.
+- The cache filename `next-hijri-holiday.cache` is retained to avoid unnecessary path churn; the `CONKY_HIJRI_EVENT_V2` header rejects old V1 contents and causes a refresh.
+- **Verification:** All 30 Python tests pass; all relevant Hijri, prayer, notification, clock, Gregorian and hover Lua tests pass. One unrelated Astrolabe soft-glow test also fails on the untouched Task 15 baseline; configuration validation passes.

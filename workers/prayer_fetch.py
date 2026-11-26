@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Fetch and atomically cache Aladhan schedules without blocking Conky.
 
-Usage: python3 workers/prayer_fetch.py YYYY-MM-DD [YYYY-MM-DD ...]
-The cache is shared by all Conky processes. Requires Python 3 only.
+Usage:
+  python3 workers/prayer_fetch.py YYYY-MM-DD [YYYY-MM-DD ...]
+  python3 workers/prayer_fetch.py [YYYY-MM-DD ...] --event --hijri-year YEAR --displayed-date YYYY-MM-DD [--event-force]
+
+The prayer and curated Hijri-event caches are shared by all Conky processes.
+All network requests run in this background worker, never in the draw loop.
 """
 import datetime as dt
 import configparser
@@ -13,6 +17,7 @@ import os
 import pathlib
 import sys
 import tempfile
+import time
 import urllib.parse
 import urllib.request
 
@@ -50,6 +55,9 @@ CACHE_HOME = pathlib.Path(os.environ.get('XDG_CACHE_HOME') or
                           str(pathlib.Path.home() / '.cache'))
 CACHE_DIR = CACHE_HOME / 'conky-prayer-times'
 REQUIRED_TIMES = ('Fajr', 'Sunrise', 'Dhuhr', 'Asr', 'Maghrib', 'Isha', 'Midnight', 'Lastthird')
+EVENT_CACHE_NAME = 'next-hijri-holiday.cache'
+EVENT_CACHE_TTL = 12 * 60 * 60
+EVENT_CALENDAR_METHOD = 'HJCoSA'
 
 
 def valid(payload, signature):
@@ -110,6 +118,239 @@ def cache_is_current(path, signature, date):
     except (OSError, UnicodeError, IndexError, KeyError, TypeError, ValueError):
         return False
 
+def parse_api_date(value):
+    """Convert AlAdhan's DD-MM-YYYY calendar date to ISO YYYY-MM-DD."""
+    if not isinstance(value, str):
+        return None
+    match = re.fullmatch(r'(\d{2})-(\d{2})-(\d{4})', value)
+    if not match:
+        return None
+    day, month, year = map(int, match.groups())
+    try:
+        return dt.date(year, month, day).isoformat()
+    except ValueError:
+        return None
+
+
+# Curated events shown by the Hijri hover. These are deliberately keyed by
+# Hijri month/day, not by every label AlAdhan happens to publish. The annual
+# calendar supplies Gregorian conversions; this allowlist controls visibility.
+# Additions must also be documented in docs/HIJRI_EVENTS.md and covered by tests.
+EVENT_RULES = (
+    ('islamic_new_year', 'Islamic New Year', 1, 1),
+    ('ashura', 'Ashura', 10, 1),
+    ('mawlid_al_nabi', 'Mawlid al-Nabi', 12, 3),
+    ('isra_and_miraj', 'Isra and Mi\'raj', 27, 7),
+    ('laylat_al_baraat', 'Laylat al-Bara\'at', 15, 8),
+    ('ramadan_begins', 'Ramadan begins', 1, 9),
+    ('eid_al_fitr', 'Eid al-Fitr', 1, 10),
+    ('hajj_begins', 'Hajj begins', 8, 12),
+    ('day_of_arafah', 'Day of Arafah', 9, 12),
+    ('eid_al_adha', 'Eid al-Adha', 10, 12),
+)
+EVENT_RULES_BY_KEY = {rule[0]: rule for rule in EVENT_RULES}
+
+
+def valid_event(event):
+    if not isinstance(event, dict):
+        return False
+    try:
+        gregorian_date = dt.date.fromisoformat(event.get('gregorian_date', ''))
+    except (TypeError, ValueError):
+        return False
+    hijri_date = event.get('hijri_date')
+    match = re.fullmatch(r'(\d{2})-(\d{2})-(\d{4})', hijri_date or '')
+    rule = EVENT_RULES_BY_KEY.get(event.get('event_key'))
+    if not match or not rule:
+        return False
+    day, month, _year = map(int, match.groups())
+    return (
+        (day, month) == (rule[2], rule[3])
+        and gregorian_date.isoformat() == event.get('gregorian_date')
+        and isinstance(event.get('name'), str)
+        and event['name'] == rule[1]
+        and event.get('calendar_method') == EVENT_CALENDAR_METHOD
+    )
+
+
+def normalize_hijri_year_calendar(payload, year):
+    """Return Hijri-date -> Gregorian-date mappings from AlAdhan's year list."""
+    if not isinstance(payload, dict) or payload.get('code') != 200:
+        raise ValueError(f'Invalid AlAdhan Hijri calendar response for {year}')
+    rows = payload.get('data')
+    if not isinstance(rows, list) or not rows:
+        raise ValueError(f'Missing AlAdhan Hijri calendar rows for {year}')
+    calendar = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError('Invalid Hijri calendar row')
+        hijri, gregorian = row.get('hijri'), row.get('gregorian')
+        if not isinstance(hijri, dict) or not isinstance(gregorian, dict):
+            raise ValueError('Missing Hijri/Gregorian date in calendar row')
+        hijri_date = hijri.get('date')
+        gregorian_date = gregorian.get('date')
+        if not parse_api_date(hijri_date) or not parse_api_date(gregorian_date):
+            raise ValueError('Invalid date in Hijri calendar row')
+        parts = re.fullmatch(r'(\d{2})-(\d{2})-(\d{4})', hijri_date)
+        if not parts or int(parts.group(3)) != int(year):
+            raise ValueError(f'Hijri calendar row is outside year {year}')
+        method = hijri.get('method') or EVENT_CALENDAR_METHOD
+        if method != EVENT_CALENDAR_METHOD:
+            raise ValueError(f'Unexpected Hijri calendar method: {method}')
+        iso_gregorian = parse_api_date(gregorian_date)
+        previous = calendar.get(hijri_date)
+        if previous is not None and previous != iso_gregorian:
+            raise ValueError(f'Conflicting Gregorian dates for {hijri_date}')
+        calendar[hijri_date] = iso_gregorian
+    return calendar
+
+
+def fetch_hijri_year_calendar(year):
+    params = {'calendarMethod': EVENT_CALENDAR_METHOD}
+    url = (f'https://api.aladhan.com/v1/islamicHolidaysByHijriYear/{int(year)}?'
+           + urllib.parse.urlencode(params))
+    request = urllib.request.Request(url, headers={'User-Agent': 'ConkyPrayer/1.0'})
+    with urllib.request.urlopen(request, timeout=8) as response:
+        payload = json.load(response)
+    return normalize_hijri_year_calendar(payload, year)
+
+
+def normalize_hijri_to_gregorian(payload, hijri_date):
+    """Normalize AlAdhan's hToG fallback for a single curated Hijri date."""
+    if not isinstance(payload, dict) or payload.get('code') != 200:
+        raise ValueError(f'Invalid AlAdhan hToG response for {hijri_date}')
+    data = payload.get('data')
+    if not isinstance(data, dict):
+        raise ValueError(f'Missing AlAdhan hToG data for {hijri_date}')
+    hijri, gregorian = data.get('hijri'), data.get('gregorian')
+    if not isinstance(hijri, dict) or not isinstance(gregorian, dict):
+        raise ValueError(f'Missing AlAdhan hToG dates for {hijri_date}')
+    if hijri.get('date') != hijri_date:
+        raise ValueError(f'AlAdhan hToG returned the wrong Hijri date for {hijri_date}')
+    method = hijri.get('method') or EVENT_CALENDAR_METHOD
+    if method != EVENT_CALENDAR_METHOD:
+        raise ValueError(f'Unexpected Hijri calendar method: {method}')
+    result = parse_api_date(gregorian.get('date'))
+    if not result:
+        raise ValueError(f'Invalid Gregorian date for {hijri_date}')
+    return result
+
+
+def fetch_hijri_to_gregorian(hijri_date):
+    params = {'calendarMethod': EVENT_CALENDAR_METHOD}
+    url = ('https://api.aladhan.com/v1/hToG/'
+           + urllib.parse.quote(hijri_date, safe='') + '?'
+           + urllib.parse.urlencode(params))
+    request = urllib.request.Request(url, headers={'User-Agent': 'ConkyPrayer/1.0'})
+    with urllib.request.urlopen(request, timeout=8) as response:
+        payload = json.load(response)
+    return normalize_hijri_to_gregorian(payload, hijri_date)
+
+
+def build_curated_events(calendar_by_year, base_hijri_year, fallback=None):
+    """Build the allowlisted event catalog for this and next Hijri year."""
+    events = []
+    for year in (int(base_hijri_year), int(base_hijri_year) + 1):
+        calendar = calendar_by_year.get(year, {})
+        for event_key, name, day, month in EVENT_RULES:
+            hijri_date = f'{day:02d}-{month:02d}-{year}'
+            gregorian_date = calendar.get(hijri_date)
+            if not gregorian_date and fallback:
+                gregorian_date = fallback(hijri_date)
+            if not gregorian_date:
+                raise ValueError(
+                    f'No Gregorian conversion for configured event {name} ({hijri_date})')
+            event = {
+                'event_key': event_key,
+                'name': name,
+                'hijri_date': hijri_date,
+                'gregorian_date': gregorian_date,
+                'calendar_method': EVENT_CALENDAR_METHOD,
+            }
+            if not valid_event(event):
+                raise ValueError(f'Invalid curated event {name} ({hijri_date})')
+            events.append(event)
+    return sorted(events, key=lambda item: (item['gregorian_date'], item['event_key']))
+
+
+def select_next_curated_event(events, displayed_date):
+    """Select only an allowlisted event on/after the widget's displayed date."""
+    try:
+        displayed = dt.date.fromisoformat(displayed_date)
+    except (TypeError, ValueError):
+        raise ValueError('Invalid displayed Gregorian date for Hijri event selection')
+    for event in events:
+        if not valid_event(event):
+            continue
+        if dt.date.fromisoformat(event['gregorian_date']) >= displayed:
+            return event
+    raise ValueError('No upcoming curated Islamic event in the fetched Hijri years')
+
+
+def fetch_next_curated_hijri_event(hijri_year, displayed_date):
+    """Fetch current/next Hijri year and select the next approved event."""
+    years = (int(hijri_year), int(hijri_year) + 1)
+    calendars = {year: fetch_hijri_year_calendar(year) for year in years}
+    events = build_curated_events(
+        calendars, hijri_year, fallback=fetch_hijri_to_gregorian)
+    return select_next_curated_event(events, displayed_date)
+
+
+def event_cache_content(event, base_hijri_year, fetched_at=None):
+    if not valid_event(event):
+        raise ValueError('Invalid curated Hijri event cache data')
+    base_hijri_year = int(base_hijri_year)
+    event_hijri_year = int(event['hijri_date'][-4:])
+    if base_hijri_year < 1 or event_hijri_year not in (
+            base_hijri_year, base_hijri_year + 1):
+        raise ValueError('Curated event is outside the cached Hijri years')
+    fields = [
+        ('fetched_at', str(int(time.time() if fetched_at is None else fetched_at))),
+        ('base_hijri_year', str(base_hijri_year)),
+        ('event_key', event['event_key']),
+        ('name', event['name']),
+        ('hijri_date', event['hijri_date']),
+        ('gregorian_date', event['gregorian_date']),
+        ('calendar_method', event['calendar_method']),
+    ]
+    if any('\n' in value or '\r' in value for _, value in fields):
+        raise ValueError('Newline in curated Hijri event data')
+    return 'CONKY_HIJRI_EVENT_V2\n' + ''.join(
+        f'{key}={value}\n' for key, value in fields)
+
+
+def event_cache_is_current(path, now=None, hijri_year=None):
+    now = int(time.time() if now is None else now)
+    try:
+        lines = path.read_text(encoding='utf-8').splitlines()
+        if not lines or lines[0] != 'CONKY_HIJRI_EVENT_V2':
+            return False
+        entries = {}
+        for line in lines[1:]:
+            if '=' not in line:
+                return False
+            key, value = line.split('=', 1)
+            if key in entries:
+                return False
+            entries[key] = value
+        event = {
+            'event_key': entries.get('event_key', ''),
+            'name': entries.get('name', ''),
+            'hijri_date': entries.get('hijri_date', ''),
+            'gregorian_date': entries.get('gregorian_date', ''),
+            'calendar_method': entries.get('calendar_method', ''),
+        }
+        fetched_at = int(entries.get('fetched_at', ''))
+        base_year = int(entries.get('base_hijri_year', ''))
+        event_year = int(event['hijri_date'][-4:])
+        return (valid_event(event) and base_year > 0
+                and event_year in (base_year, base_year + 1)
+                and (hijri_year is None or base_year == int(hijri_year))
+                and fetched_at <= now and now - fetched_at <= EVENT_CACHE_TTL)
+    except (OSError, UnicodeError, TypeError, ValueError):
+        return False
+
+
 def fetch(date, location, signature):
     date_api = dt.date.fromisoformat(date).strftime('%d-%m-%Y')
     params = {'midnightMode': location['midnight_mode'] or '1',
@@ -151,8 +392,50 @@ def atomic_write(path, content):
             os.unlink(tmp)
 
 
-def main(dates):
-    location, signature = get_location()
+def parse_worker_args(args):
+    dates = []
+    event_requested = False
+    force_event = False
+    hijri_year = None
+    displayed_date = None
+    index = 0
+    while index < len(args):
+        value = args[index]
+        if value == '--event':
+            event_requested = True
+        elif value == '--event-force':
+            force_event = True
+        elif value in ('--hijri-year', '--displayed-date'):
+            index += 1
+            if index >= len(args):
+                raise ValueError(f'Missing value for {value}')
+            option_value = args[index]
+            if value == '--hijri-year':
+                hijri_year = int(option_value)
+                if hijri_year < 1:
+                    raise ValueError('Invalid Hijri year')
+            else:
+                try:
+                    displayed_date = dt.date.fromisoformat(option_value).isoformat()
+                except ValueError:
+                    raise ValueError('Invalid displayed date')
+        elif value.startswith('--'):
+            raise ValueError(f'Unknown option: {value}')
+        else:
+            dates.append(value)
+        index += 1
+    if force_event and not event_requested:
+        raise ValueError('--event-force requires --event')
+    if event_requested and (hijri_year is None or displayed_date is None):
+        raise ValueError('--event requires --hijri-year and --displayed-date')
+    return dates, event_requested, force_event, hijri_year, displayed_date
+
+
+def main(args):
+    dates, event_requested, force_event, hijri_year, displayed_date = parse_worker_args(args)
+    if not dates and not event_requested:
+        return 2
+    location, signature = get_location() if dates else (None, None)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     with (CACHE_DIR / '.lock').open('a+') as lock:
         try:
@@ -174,6 +457,19 @@ def main(dates):
             except (OSError, ValueError, KeyError) as exc:
                 print(f'{date}: {exc}', file=sys.stderr)
                 failed = True
+
+        if event_requested:
+            event_path = CACHE_DIR / EVENT_CACHE_NAME
+            if force_event or not event_cache_is_current(
+                    event_path, hijri_year=hijri_year):
+                try:
+                    event = fetch_next_curated_hijri_event(
+                        hijri_year, displayed_date)
+                    atomic_write(event_path, event_cache_content(
+                        event, base_hijri_year=hijri_year))
+                except (OSError, ValueError, KeyError, TypeError) as exc:
+                    print(f'curated Hijri event: {exc}', file=sys.stderr)
+                    failed = True
         return 1 if failed else 0
 
 

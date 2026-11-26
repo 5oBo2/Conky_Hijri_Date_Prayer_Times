@@ -39,6 +39,7 @@ end
 local ACCENT = configured_accent()
 local BLUE = { 0.10, 0.80, 1.0, 1 }
 local ORANGE = { 1, 0.47, 0.19, 1 }
+local MAGENTA = { 189 / 255, 134 / 255, 197 / 255, 200 / 255 }
 local FONT = settings.get('appearance', 'font', 'DejaVu Sans')
 local FONT_CLOCK, FONT_DATE = 160 * SCALE, 40 * SCALE
 
@@ -295,6 +296,251 @@ local function draw_clock_reveal(cr, now, idle_size, slot_left, slot_right, base
     end
 end
 
+local function date_noon(value)
+    if type(value) ~= 'string' then return nil end
+    local year, month, day = value:match('^(%d%d%d%d)%-(%d%d)%-(%d%d)$')
+    if not year then return nil end
+    return os.time({
+        year = tonumber(year), month = tonumber(month), day = tonumber(day),
+        hour = 12, min = 0, sec = 0,
+    })
+end
+
+local function days_between_dates(from_date, to_date)
+    local from_time, to_time = date_noon(from_date), date_noon(to_date)
+    if not from_time or not to_time then return nil end
+    -- Noon plus rounding keeps date differences correct across DST changes.
+    return math.floor(os.difftime(to_time, from_time) / 86400 + 0.5)
+end
+
+local function fit_text_to_width(cr, value, size, max_width)
+    local ext = measure(cr, value, size)
+    if ext.x_advance <= max_width then return value, ext end
+    local suffix = '...'
+    local suffix_ext = measure(cr, suffix, size)
+    if suffix_ext.x_advance > max_width then
+        return '', measure(cr, '', size)
+    end
+
+    -- Event names are normalized to printable ASCII before reaching Cairo,
+    -- making byte-wise truncation safe and deterministic.
+    local low, high = 0, #value
+    while low < high do
+        local middle = math.floor((low + high + 1) / 2)
+        local candidate = value:sub(1, middle) .. suffix
+        if measure(cr, candidate, size).x_advance <= max_width then
+            low = middle
+        else
+            high = middle - 1
+        end
+    end
+    local fitted = value:sub(1, low) .. suffix
+    return fitted, measure(cr, fitted, size)
+end
+
+local function fit_event_meta_parts(cr, parts, size, max_width)
+    local fitted, used = {}, 0
+    for _, part in ipairs(parts) do
+        local remaining = math.max(0, max_width - used)
+        if remaining <= 0 then break end
+        local value = part[1]
+        local ext = measure(cr, value, size)
+        if ext.x_advance > remaining then
+            value, ext = fit_text_to_width(cr, value, size, remaining)
+            if value ~= '' then
+                fitted[#fitted + 1] = {value, part[2], ext = ext}
+            end
+            break
+        end
+        fitted[#fitted + 1] = {value, part[2], ext = ext}
+        used = used + ext.x_advance
+    end
+    return fitted
+end
+
+local function draw_hijri_reveal(cr, hijri, event, displayed_date, widget_width, baseline)
+    local day = tonumber(hijri.day)
+    local month = tonumber(hijri.month.number)
+    local year = tostring(hijri.year)
+    local month_number = string.format('%02d', month)
+    local month_name = MONTHS[month]
+    local sacred_month = SACRED_MONTHS[month] == true
+    local laylat_window = month == 9 and day >= 20
+    local month_meta = string.format('%s AH · DAY %02d%s', year, day,
+        sacred_month and ' · HOLY MONTH' or '')
+    local event_label = 'NEXT ISLAMIC EVENT'
+    local event_name = event and event.name or 'Event data unavailable'
+    local event_meta_parts = {}
+    local event_state = event and 'ALADHAN · CURATED EVENTS'
+        or 'WAITING FOR ALADHAN'
+
+    if event then
+        local days = days_between_dates(displayed_date, event.gregorian_date)
+        local event_time = date_noon(event.gregorian_date)
+        if days ~= nil and days >= 0 and event_time then
+            local countdown
+            if days == 0 then
+                countdown = 'TODAY'
+            elseif days == 1 then
+                countdown = 'IN 1 DAY'
+            else
+                countdown = string.format('IN %d DAYS', days)
+            end
+            local gregorian_label = string.format('%d %s %s',
+                tonumber(os.date('%d', event_time)), os.date('%b', event_time),
+                os.date('%Y', event_time))
+            event_meta_parts = {
+                {countdown, ACCENT},
+                {' · ', {1, 1, 1, 105 / 255}},
+                {gregorian_label, WHITE},
+                {' · ', {1, 1, 1, 105 / 255}},
+                {event.hijri_date .. ' AH', {1, 1, 1, 150 / 255}},
+            }
+        else
+            event_name = 'Refreshing next event...'
+            event_state = 'ALADHAN · REFRESHING'
+            event_meta_parts = {
+                {'AlAdhan event date is behind the displayed Hijri date',
+                    {1, 1, 1, 135 / 255}},
+            }
+        end
+    else
+        event_meta_parts = {
+            {'Waiting for AlAdhan event data', {1, 1, 1, 135 / 255}},
+        }
+    end
+
+    local available_width = math.max(1,
+        math.min(760 * SCALE, widget_width - 32 * SCALE))
+    local factor = 1
+    local metrics
+    for _ = 1, 5 do
+        local month_size = 35 * SCALE * factor
+        local suffix_size = 10 * SCALE * factor
+        local month_name_size = 16 * SCALE * factor
+        local month_meta_size = 7.5 * SCALE * factor
+        local label_size = 7 * SCALE * factor
+        local event_name_size = 14 * SCALE * factor
+        local event_meta_size = 7.5 * SCALE * factor
+        local gap = 12 * SCALE * factor
+
+        local month_ext = measure(cr, month_number, month_size)
+        local suffix_ext = measure(cr, '/12', suffix_size)
+        local month_name_ext = measure(cr, month_name, month_name_size)
+        local month_meta_ext = measure(cr, month_meta, month_meta_size)
+        local label_ext = measure(cr, event_label, label_size)
+        local name_ext = measure(cr, event_name, event_name_size)
+        local event_meta_width = 0
+        local max_event_width = 280 * SCALE * factor
+        repeat
+            event_meta_width = 0
+            for _, part in ipairs(event_meta_parts) do
+                part.ext = measure(cr, part[1], event_meta_size)
+                event_meta_width = event_meta_width + part.ext.x_advance
+            end
+            if event_meta_width <= max_event_width
+                or event_meta_size <= 6 * SCALE * factor then break end
+            event_meta_size = event_meta_size * 0.9
+        until false
+
+        local index_width = month_ext.x_advance + 3 * SCALE * factor
+            + suffix_ext.x_advance
+        local copy_width = math.max(month_name_ext.x_advance,
+            month_meta_ext.x_advance)
+        local event_width = math.min(280 * SCALE * factor,
+            math.max(label_ext.x_advance, name_ext.x_advance, event_meta_width))
+        local total_width = index_width + gap + copy_width + gap
+            + 1 * SCALE * factor + gap + event_width
+
+        metrics = {
+            factor = factor, gap = gap,
+            month_size = month_size, suffix_size = suffix_size,
+            month_name_size = month_name_size, month_meta_size = month_meta_size,
+            label_size = label_size, event_name_size = event_name_size,
+            event_meta_size = event_meta_size,
+            month_ext = month_ext, suffix_ext = suffix_ext,
+            month_name_ext = month_name_ext, month_meta_ext = month_meta_ext,
+            label_ext = label_ext, name_ext = name_ext,
+            index_width = index_width, copy_width = copy_width,
+            event_width = event_width, total_width = total_width,
+        }
+        if total_width <= available_width then break end
+        factor = factor * available_width / total_width
+    end
+
+    -- Canonical event names still use the measured event column and may be
+    -- shortened defensively, never colliding with the Hijri month block.
+    local min_event_size = 7 * SCALE * metrics.factor
+    local event_name_size = metrics.event_name_size
+    local name_ext = metrics.name_ext
+    while name_ext.x_advance > metrics.event_width
+        and event_name_size > min_event_size do
+        event_name_size = event_name_size * 0.9
+        name_ext = measure(cr, event_name, event_name_size)
+    end
+    metrics.event_name_size = event_name_size
+    event_name, name_ext = fit_text_to_width(cr, event_name,
+        metrics.event_name_size, metrics.event_width)
+    event_meta_parts = fit_event_meta_parts(cr, event_meta_parts,
+        metrics.event_meta_size, metrics.event_width)
+
+    local x = (widget_width - metrics.total_width) / 2
+    local baseline_y = baseline
+    cairo_set_font_size(cr, metrics.month_size)
+    text(cr, month_number, x, baseline_y + 3 * metrics.factor, ACCENT)
+    cairo_set_font_size(cr, metrics.suffix_size)
+    text(cr, '/12', x + metrics.month_ext.x_advance + 3 * SCALE * metrics.factor,
+        baseline_y + 3 * metrics.factor, {1, 1, 1, 135 / 255})
+
+    local copy_x = x + metrics.index_width + metrics.gap
+    cairo_set_font_size(cr, metrics.month_name_size)
+    text(cr, month_name, copy_x, baseline_y - 1 * metrics.factor, WHITE)
+    cairo_set_font_size(cr, metrics.month_meta_size)
+    text(cr, month_meta, copy_x, baseline_y + 13 * metrics.factor,
+        {1, 1, 1, 145 / 255})
+
+    local divider_x = copy_x + metrics.copy_width + metrics.gap
+    cairo_set_source_rgba(cr, 1, 1, 1, 65 / 255)
+    cairo_set_line_width(cr, math.max(1, SCALE * metrics.factor))
+    cairo_move_to(cr, divider_x, baseline_y - 17 * metrics.factor)
+    cairo_line_to(cr, divider_x, baseline_y + 17 * metrics.factor)
+    cairo_stroke(cr)
+
+    local event_x = divider_x + 1 * SCALE * metrics.factor + metrics.gap
+    cairo_set_font_size(cr, metrics.label_size)
+    text(cr, event_label, event_x, baseline_y - 13 * metrics.factor, MAGENTA)
+    cairo_set_font_size(cr, metrics.event_name_size)
+    text(cr, event_name, event_x, baseline_y + 1 * metrics.factor, WHITE)
+
+    local meta_x = event_x
+    cairo_set_font_size(cr, metrics.event_meta_size)
+    for _, part in ipairs(event_meta_parts) do
+        text(cr, part[1], meta_x, baseline_y + 14 * metrics.factor, part[2])
+        meta_x = meta_x + part.ext.x_advance
+    end
+
+    -- Keep the subtle source/status footer from the V4 design, but lift it
+    -- slightly so its descenders cannot be clipped by the Date surface.
+    local state_size = 6.5 * SCALE * metrics.factor
+    local footer_text = laylat_window
+        and 'ONE OF THESE NIGHTS MAY BE LAYLAT AL-QADR'
+        or event_state
+    local footer_ext = measure(cr, footer_text, state_size)
+    if laylat_window then
+        footer_text, footer_ext = fit_text_to_width(cr, footer_text,
+            state_size, metrics.event_width)
+        cairo_set_font_size(cr, state_size)
+        text(cr, footer_text, event_x,
+            baseline_y + 20 * metrics.factor, MAGENTA)
+    elseif event_x + metrics.event_width - footer_ext.x_advance
+        >= meta_x + 4 * SCALE then
+        cairo_set_font_size(cr, state_size)
+        text(cr, footer_text,
+            event_x + metrics.event_width - footer_ext.x_advance,
+            baseline_y + 20 * metrics.factor, {1, 1, 1, 85 / 255})
+    end
+end
+
 local function draw_divider(cr, x, top_y, bottom_y)
     local pat = cairo_pattern_create_linear(0, top_y, 0, bottom_y)
     cairo_pattern_add_color_stop_rgba(pat, 0.0, 1, 1, 1, 0.0)
@@ -519,9 +765,15 @@ function conky_main()
     -- Apply date adjustment to the displayed Hijri date, not to Maghrib's clock.
     local hijri_date = data_source.shift_date(now,
         DAYS_ADJUSTMENT + (rollover and 1 or 0))
+    local source_hijri_year = actual_data
+        and actual_data.date and actual_data.date.hijri
+        and tonumber(actual_data.date.hijri.year) or nil
     data_source.ensure_dates({ actual_today, hijri_date,
-        data_source.date_plus(actual_today, 1) }, now)
+        data_source.date_plus(actual_today, 1) }, now, hijri_date,
+        source_hijri_year)
     local hijri_data = actual_data and data_source.get(hijri_date)
+    local next_hijri_event = data_source.get_next_hijri_event
+        and data_source.get_next_hijri_event(now, hijri_date) or nil
     check_fasting_reminder(now, maghrib, hijri_data, rollover)
 
     local cs = Surface.acquire()
@@ -588,28 +840,46 @@ function conky_main()
         local month = tonumber(h.month.number)
         local year = tostring(h.year)
         if day and month and MONTHS[month] then
-            local pieces = { string.format('%02d', day), MONTHS[month], year }
-            local margin = FONT_DATE / 2.5
-            local widths = {}
-            local total = margin * 2
-            for i = 1, 3 do
-                widths[i] = width(cr, pieces[i], ext)
-                total = total + widths[i]
-            end
-            local x = (conky_window.width - total) / 2
-            for i = 1, 3 do
-                local piece_color = WHITE
-                if i == 1 and month ~= 9 then
-                    if day == 12 then piece_color = RED
-                    elseif day >= 13 and day <= 15 then piece_color = ACCENT end
-                elseif i == 2 and SACRED_MONTHS[month] then
-                    piece_color = ACCENT
+            local hijri_zone_top = math.max(0, y_hijri - 36 * SCALE)
+            local hijri_zone_bottom = math.min(conky_window.height or math.huge,
+                y_hijri + 30 * SCALE)
+            hover:set_zone('hijri', {
+                0, hijri_zone_top, conky_window.width, hijri_zone_bottom,
+            })
+            if hover:visible('hijri', now) then
+                draw_hijri_reveal(cr, h, next_hijri_event, hijri_date,
+                    conky_window.width, y_hijri)
+            else
+                local pieces = { string.format('%02d', day), MONTHS[month], year }
+                local margin = FONT_DATE / 2.5
+                local widths = {}
+                local total = margin * 2
+                for i = 1, 3 do
+                    widths[i] = width(cr, pieces[i], ext)
+                    total = total + widths[i]
                 end
-                text(cr, pieces[i], x, y_hijri, piece_color)
-                x = x + widths[i] + margin
+                local x = (conky_window.width - total) / 2
+                for i = 1, 3 do
+                    local piece_color = WHITE
+                    if i == 1 then
+                        if month == 9 and day >= 20 then
+                            piece_color = ACCENT
+                        elseif month ~= 9 then
+                            if day == 12 then piece_color = RED
+                            elseif day >= 13 and day <= 15 then piece_color = ACCENT end
+                        end
+                    elseif i == 2 and SACRED_MONTHS[month] then
+                        piece_color = ACCENT
+                    end
+                    text(cr, pieces[i], x, y_hijri, piece_color)
+                    x = x + widths[i] + margin
+                end
             end
+        else
+            hover:set_zone('hijri', nil)
         end
     else
+        hover:set_zone('hijri', nil)
         local loading = 'Fetching Hijri date...'
         text(cr, loading,
             (conky_window.width - width(cr, loading, ext)) / 2,

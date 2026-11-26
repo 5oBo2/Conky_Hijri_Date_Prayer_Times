@@ -218,6 +218,59 @@ restored before measuring/drawing Hijri so the hover cannot shrink it. The
 `gregorian` hitbox is independent of the existing `weather` hover zone; both
 use `date_weather_hover_failsafe_seconds`. No new setting is required.
 
+## Hijri month and next-event hover
+
+Hover the Hijri date row to replace the unchanged idle date temporarily with
+the approved month/event layout: the numbered month (`06 / 12`), month name,
+Hijri year and day, then the next **curated** Islamic occasion with a days
+countdown, Gregorian date and Hijri date. The event label uses the soft magenta
+accent; the month index and countdown use the configured gold accent.
+
+The widget displays an explicit allowlist of ten major occasions only:
+Islamic New Year, Ashura, Mawlid al-Nabi, Isra and Mi'raj, Laylat al-Bara'at,
+Ramadan begins, Eid al-Fitr, Hajj begins, Day of Arafah and Eid al-Adha.
+Islamic New Year is synthesized at 1 Muharram; the API's entry on that date
+may name an unrelated individual. The four sacred months (Muharram, Rajab,
+Dhul Qidah and Dhul Hijjah) are annotated as `HOLY MONTH`, not shown as
+countdown events. During Ramadan, Hijri days 20 through the final day use the
+configured accent and the hover says `ONE OF THESE NIGHTS MAY BE LAYLAT
+AL-QADR`; no specific night is claimed.
+
+Individual births, Urs, personal commemorations, historical anniversaries,
+unlisted API events, repeated Hajj rows and individual Laylat al-Qadr candidate
+dates are excluded. The full event allowlist, sacred-month and Ramadan rules,
+exclusions, data-source policy, cache contract and instructions for future
+agents are documented in [docs/HIJRI_EVENTS.md](docs/HIJRI_EVENTS.md).
+
+The event dates come from AlAdhan's annual
+`GET /v1/islamicHolidaysByHijriYear/{year}?calendarMethod=HJCoSA` endpoint for
+the current and following Hijri years. Missing fixed-date conversions fall
+back to `GET /v1/hToG/{DD-MM-YYYY}?calendarMethod=HJCoSA`. The app deliberately
+does **not** use `nextHijriHoliday` for display selection because it can return
+an excluded Urs or another non-approved event before the next major occasion.
+Dates are converted to application-owned canonical event names using the
+allowlist in `workers/prayer_fetch.py`. `lib/Prayer_Data.lua` independently
+validates the cached event key, canonical name and Hijri month/day against a
+matching allowlist before exposing it to the widget.
+
+The widget draws application-owned ASCII event labels rather than raw API
+holiday strings, so API-specific honorific glyphs cannot produce missing-glyph
+boxes. Long event names and metadata are measured and shortened with an ASCII
+ellipsis rather than clipped. HJCoSA is requested explicitly to match the
+Hijri method returned by the existing prayer-times API. The widget's
+`hijri_offset_days` and Maghrib rollover are respected by comparing the event
+date with the same adjusted Gregorian source date used to render today's
+Hijri date.
+
+`workers/prayer_fetch.py` fetches the annual calendars in the background and
+writes the selected event to `next-hijri-holiday.cache` using schema
+`CONKY_HIJRI_EVENT_V2`. The cache includes the base Hijri year, expires after
+12 hours and is refreshed when the year changes or the selected event falls
+behind the currently displayed Hijri date. No HTTP request runs inside
+Conky's drawing loop. If the API response is missing, invalid, expired or
+unavailable, the hover says that event data is unavailable rather than
+inventing an event or countdown. No new setting is required.
+
 ## Date hover forecast design
 
 With `date_weather_mode = date_and_weather`, hovering over the Date widget's
@@ -526,7 +579,7 @@ widgets/  Prayer_Times.lua, Hijri_Date.lua, Weather.lua,
 lib/      Settings.lua, Widget_Geometry.lua, Surface.lua, Hover_State.lua,
           Prayer_Data.lua, Weather_Data.lua, Weather_Icons.lua
 workers/  prayer_fetch.py, weather_fetch.py, layout.py
-docs/     HOVER_ZONE.md, NATIVE_WAYLAND_MIGRATION.md
+docs/     HOVER_ZONE.md, HIJRI_EVENTS.md, NATIVE_WAYLAND_MIGRATION.md
 assets/   weather/*.png, optional athan.wav
 profiles/ optional full-settings snapshots
 layouts/  optional layout-only presets
