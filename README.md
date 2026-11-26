@@ -218,6 +218,26 @@ restored before measuring/drawing Hijri so the hover cannot shrink it. The
 `gregorian` hitbox is independent of the existing `weather` hover zone; both
 use `date_weather_hover_failsafe_seconds`. No new setting is required.
 
+## Weather icons: original-artwork-matched Cairo vectors
+
+All 20 weather icons are drawn directly with Cairo from contour paths **traced
+from the actual original 256x256 PNGs**. No generic cloud shape, hand-guessed
+crescent, raster image surface, PNG mask, or PNG I/O is used at runtime. The
+original cloud shapes (including icon 26's overlapping large/small clouds),
+weather marks, sun/moon outlines, and occlusion are preserved. Subpixel traces
+and five opacity bands closely reproduce the source's thin antialiased lines.
+
+Only sun/moon paths follow `appearance.next_prayer_color`; other paths stay
+white. Changing the shared accent takes effect after `python3 restart.py`.
+Both standalone Weather and the optional Date weather header/three-day
+forecast use the same renderer (`lib/Weather_Icons.lua`) and generated geometry
+(`lib/Weather_Icon_Paths.lua`). The originals remain in `assets/weather/` as
+artwork references and for regeneration/rollback, but **Conky no longer loads
+them**. The old generated split PNG layers are removed.
+
+See [docs/WEATHER_ICON_TINT.md](docs/WEATHER_ICON_TINT.md) for reproduction,
+source-fidelity checks, developer dependencies and future-agent instructions.
+
 ## Hijri month and next-event hover
 
 Hover the Hijri date row to replace the unchanged idle date temporarily with
@@ -393,13 +413,13 @@ The standalone Weather widget does **not** need a restart after a Date mode chan
 
 Both the standalone Weather widget and Date's main temperature use the same
 Open-Meteo **current** `weather_code` and `is_day` fields. They select the same
-condition icon without changing either widget's visibility or placement. Weather
-icons are loaded from `assets/weather/NAME.png` and are 256×256 transparent PNGs.
-Both widgets use `lib/Weather_Icons.lua` for the WMO mapping and PNG drawing;
-icons are loaded lazily and cached within each Conky process, including the
-Date widget's three-day hover forecast.
+condition icon without changing either widget's visibility or placement. The
+IDs in the table correspond to the original `assets/weather/<id>.png` source
+images. At runtime, both widgets draw the matching native Cairo vector path
+from `lib/Weather_Icon_Paths.lua` through `lib/Weather_Icons.lua`. No PNG
+surfaces or raster masks are loaded, including in Date's three-day forecast.
 
-| Open-Meteo WMO condition codes | Daytime PNG | Nighttime PNG |
+| Open-Meteo WMO condition codes | Day icon ID (source PNG) | Night icon ID (source PNG) |
 | --- | --- | --- |
 | `0` clear | `32.png` | `31.png` |
 | `1` mainly clear | `34.png` | `33.png` |
@@ -539,7 +559,7 @@ prayer and weather workers refresh their location-keyed caches automatically.
 
 - **Prayer + Hijri:** `workers/prayer_fetch.py` uses Aladhan to populate the `CONKY_PRAYER_V2` cache consumed by `lib/Prayer_Data.lua`, including the API's `Lastthird` time (not an estimate calculated in Lua). The Hijri date rolls at Maghrib; the month names Muharram, Rajab, Dhul Qidah and Dhul Hijjah use the configured `appearance.next_prayer_color` accent. Other month names remain white. **Left-click the seventh Prayer column** to switch its label/time between **Midnight** and **Last 3rd**. The column starts on Midnight at each launch; the post-Isha **Till Midnight** countdown never changes with this toggle. The hovered **Till Last 3rd** countdown keeps its normal color during its final 15 minutes; ordinary prayer countdowns retain the red final-15-minute warning. Prayer countdown and hover zones are configured with `elapsed_minutes`, `hover_failsafe_seconds`, `hover_debug_outline`, `hijri_offset_days`, and `athan_enabled`; see `docs/HOVER_ZONE.md` for the mouse-hook diagnostic. On Fedora 45 / Conky 1.24.2 XWayland the user verified that the click toggle works. Setting `update_interval = 0.25` in `configs/conky_prayer_times.conf` (manually, on the installed widget) makes the updated column appear within the next quarter-second refresh, at the cost of four redraws per second. No new setting is needed. Prayer time interpretation expects your system timezone to match the configured location.
 - **Weather:** `weather_fetch.py` uses Open-Meteo without an API key for noncommercial personal use, caching current conditions, sunrise/sunset and tomorrow-through-day-three daily forecast data in `~/.cache/conky-sun-weather/`. Weather remains independent of Date; enabling `date_and_weather` adds a *second* current-weather display and its three-day hover forecast inside Date without suppressing standalone Weather. Unavailable forecast data is omitted instead of showing invented or outdated rows.
-- **Astrolabe:** draws a transparent Sun/Moon dial with lunar phase, night progress and solar schedule from shared caches. It discards weather solar timestamps from a different calendar day (including after sleep/wake), falling back to today's prayer cache or temporarily showing a waiting state until fresh data arrives. The 24-hour bar and lunar phase continue to update. **Left-click either the dial or the 24-hour bar** to toggle five `F/D/A/M/I` prayer ticks/labels on both surfaces; they persist after mouse leave until clicked again (and reset when Conky restarts). Hover alone does nothing. When prayers are shown, a **magenta arc** on the night dial track marks the last third of the Islamic night from the *cached* `Lastthird` start to **Fajr** (not sunrise). Before sunrise this uses the previous evening's `Lastthird` and today's Fajr; afterward it uses today's `Lastthird` and tomorrow's Fajr. The dial uses the relevant night's Maghrib/Isha; the 24h bar always uses today's five prayers. **Two gold bands** directly on the daylight dial track are visible even without the prayer overlay, matching the bar's existing 5%-of-24-hours (72-minute) sunrise/sunset gradient windows. These are a visual approximation, not solar-elevation-derived photographic golden hours. Prayer markers wait for required cached dates instead of inventing times. `hover_failsafe_seconds` no longer controls Astrolabe prayer visibility. It redraws at 0.25 seconds while running. The Astrolabe has no background card; icons for standalone Weather and Date weather are loaded from `assets/weather/`.
+- **Astrolabe:** draws a transparent Sun/Moon dial with lunar phase, night progress and solar schedule from shared caches. It discards weather solar timestamps from a different calendar day (including after sleep/wake), falling back to today's prayer cache or temporarily showing a waiting state until fresh data arrives. The 24-hour bar and lunar phase continue to update. **Left-click either the dial or the 24-hour bar** to toggle five `F/D/A/M/I` prayer ticks/labels on both surfaces; they persist after mouse leave until clicked again (and reset when Conky restarts). Hover alone does nothing. When prayers are shown, a **magenta arc** on the night dial track marks the last third of the Islamic night from the *cached* `Lastthird` start to **Fajr** (not sunrise). Before sunrise this uses the previous evening's `Lastthird` and today's Fajr; afterward it uses today's `Lastthird` and tomorrow's Fajr. The dial uses the relevant night's Maghrib/Isha; the 24h bar always uses today's five prayers. **Two gold bands** directly on the daylight dial track are visible even without the prayer overlay, matching the bar's existing 5%-of-24-hours (72-minute) sunrise/sunset gradient windows. These are a visual approximation, not solar-elevation-derived photographic golden hours. Prayer markers wait for required cached dates instead of inventing times. `hover_failsafe_seconds` no longer controls Astrolabe prayer visibility. It redraws at 0.25 seconds while running. The Astrolabe has no background card; weather icons for standalone Weather and Date are rendered from original-artwork-matched Cairo paths.
 
 **Dial overlay transparency:** In `widgets/Sun_Moon_Astrolabe.lua`, edit
 `GOLDEN_HOUR_OPACITY = 0.60` for the two gold daylight arcs and
@@ -577,10 +597,10 @@ configs/  conky_prayer_times.conf, conky_date.conf, conky_weather.conf,
 widgets/  Prayer_Times.lua, Hijri_Date.lua, Weather.lua,
           Sun_Moon_Astrolabe.lua
 lib/      Settings.lua, Widget_Geometry.lua, Surface.lua, Hover_State.lua,
-          Prayer_Data.lua, Weather_Data.lua, Weather_Icons.lua
+          Prayer_Data.lua, Weather_Data.lua, Weather_Icons.lua, Weather_Icon_Paths.lua
 workers/  prayer_fetch.py, weather_fetch.py, layout.py
 docs/     HOVER_ZONE.md, HIJRI_EVENTS.md, NATIVE_WAYLAND_MIGRATION.md
-assets/   weather/*.png, optional athan.wav
+assets/   weather/*.png (vector source references), optional athan.wav
 profiles/ optional full-settings snapshots
 layouts/  optional layout-only presets
 ```

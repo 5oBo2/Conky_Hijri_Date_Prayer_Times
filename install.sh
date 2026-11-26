@@ -83,9 +83,8 @@ DESKTOP
 fi
 echo "Installed four widgets in: $DEST"
 echo "Optional Athan audio: $DEST/athan.wav or $DEST/assets/athan.wav"
-if [[ ! -f "$DEST/assets/weather/32.png" ]]; then
-  echo "[WARN] Weather icon pack is missing from $DEST/assets/weather; supply the original PNG assets."
-fi
+# Conky draws source-traced Cairo paths. Original PNGs are optional
+# development references and are no longer required to render weather.
 if [[ "$run_wizard" == 1 && -t 0 ]]; then
   printf '\nConfigure location, font, scale and placement for all four now? [Y/n] '
   read -r answer || answer=n

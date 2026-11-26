@@ -52,15 +52,19 @@ local calls = {
     'cairo_move_to', 'cairo_destroy', 'cairo_rectangle', 'cairo_fill', 'cairo_set_line_width',
     'cairo_stroke', 'cairo_arc', 'cairo_pattern_add_color_stop_rgba', 'cairo_set_source',
     'cairo_pattern_destroy', 'cairo_save', 'cairo_restore', 'cairo_translate',
-    'cairo_scale', 'cairo_set_source_surface', 'cairo_paint', 'cairo_curve_to',
+    'cairo_scale', 'cairo_set_source_surface', 'cairo_paint', 'cairo_mask_surface', 'cairo_curve_to',
     'cairo_close_path', 'cairo_line_to', 'cairo_set_line_cap', 'cairo_set_line_join',
+    'cairo_new_path', 'cairo_set_fill_rule',
 }
 for _, call in ipairs(calls) do _G[call] = noop end
 _G.CAIRO_FONT_SLANT_NORMAL = 0
 _G.CAIRO_FONT_WEIGHT_NORMAL = 0
+_G.CAIRO_FILL_RULE_EVEN_ODD = 1
 _G.cairo_create = function() return {} end
 _G.cairo_pattern_create_linear = function() return {} end
-_G.cairo_image_surface_create_from_png = function() return {} end
+_G.cairo_image_surface_create_from_png = function()
+    error('weather draw must never load PNG surfaces')
+end
 _G.cairo_text_extents_t = {create = function() return {} end}
 _G.cairo_text_extents = function(_, value, ext)
     ext.x_advance = #tostring(value) * 14

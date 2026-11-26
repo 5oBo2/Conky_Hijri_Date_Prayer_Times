@@ -1,12 +1,26 @@
--- Shared Open-Meteo weather condition icons for Weather and Hijri Date.
--- The surface cache is lazy and belongs to each Conky/Lua process.
+-- Pixel-faithful traced weather artwork for standalone Weather and Date.
+-- The original 256x256 PNG silhouettes are stored as native Cairo fill paths.
+-- All clouds, double cloud overlaps, rays, moon curves and precipitation come
+-- directly from those exact icons; no procedural approximations or PNG I/O.
+-- See docs/WEATHER_ICON_TINT.md before editing or regenerating path geometry.
 local base = debug.getinfo(1, 'S').source:match('^@(.*/)') or './lib/'
-local root = base .. '../'
+local settings = dofile(base .. 'Settings.lua')
+local PATHS = dofile(base .. 'Weather_Icon_Paths.lua')
 local M = {}
-local icons = {}
+local hex = settings.get('appearance', 'next_prayer_color', '#efb46f')
+assert(type(hex) == 'string' and hex:match('^#%x%x%x%x%x%x$'),
+    'appearance.next_prayer_color must be #RRGGBB')
+local ACCENT = {
+    tonumber(hex:sub(2, 3), 16) / 255,
+    tonumber(hex:sub(4, 5), 16) / 255,
+    tonumber(hex:sub(6, 7), 16) / 255,
+}
+-- Five semi-transparent contour bands reconstruct the source's antialiasing.
+-- Draw from widest/softest to narrowest/opaque in the 256px source canvas.
+local OPACITY = { .055, .142857142857, .259259259259, .483333333333, 1 }
 
 function M.code(wmo, day)
-    -- Open-Meteo WMO weather_code and is_day -> matching transparent PNG.
+    -- Open-Meteo WMO weather_code and is_day -> original weather icon.
     if wmo == 0 then return day and 32 or 31 end                 -- clear
     if wmo == 1 then return day and 34 or 33 end                 -- mainly clear
     if wmo == 2 then return day and 30 or 29 end                 -- partly cloudy
@@ -29,18 +43,40 @@ function M.code(wmo, day)
     if wmo == 96 or wmo == 99 then return 0 end    -- severe / hail thunderstorm
     return 26                                                   -- unrecognized WMO code
 end
-function M.draw(cr, id, x, y, size)
-    if not icons[id] then
-        local path = root .. 'assets/weather/' .. id .. '.png'
-        icons[id] = cairo_image_surface_create_from_png(path)
+
+local function fill_contours(cr, tiers, r, g, b)
+    if not tiers then return end
+    for level, loops in ipairs(tiers) do
+        if #loops > 0 then
+            cairo_new_path(cr)
+            for _, points in ipairs(loops) do
+                cairo_move_to(cr, points[1], points[2])
+                for j = 3, #points, 2 do
+                    cairo_line_to(cr, points[j], points[j + 1])
+                end
+                cairo_close_path(cr)
+            end
+            cairo_set_source_rgba(cr, r, g, b, OPACITY[level])
+            cairo_fill(cr)
+        end
     end
-    local surface = icons[id]
-    if not surface then return end
+end
+
+function M.draw(cr, id, x, y, size)
+    if not size or size <= 0 then return end
+    local icon = PATHS[id] or PATHS[26]
     cairo_save(cr)
     cairo_translate(cr, x, y)
     cairo_scale(cr, size / 256, size / 256)
-    cairo_set_source_surface(cr, surface, 0, 0)
-    cairo_paint(cr)
+    cairo_set_fill_rule(cr, CAIRO_FILL_RULE_EVEN_ODD)
+    -- Three source-derived layers preserve the original overlap order:
+    -- rear clouds first, sun/moon over the rear cloud, foreground cloud last.
+    -- The final white pass therefore interrupts the celestial stroke only
+    -- where the source artwork shows the lower cloud in front.
+    fill_contours(cr, icon.n, 1, 1, 1)
+    fill_contours(cr, icon.c, ACCENT[1], ACCENT[2], ACCENT[3])
+    fill_contours(cr, icon.f, 1, 1, 1)
     cairo_restore(cr)
 end
+
 return M

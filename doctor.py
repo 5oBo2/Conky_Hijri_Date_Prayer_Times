@@ -114,7 +114,8 @@ def check():
                 'configs/conky_sun_moon.conf', 'configs/conky_weather.conf',
                 'configs/conky_prayer_times.conf', 'configs/conky_date.conf',
                 'workers/prayer_fetch.py', 'workers/weather_fetch.py',
-                'workers/layout.py', 'assets/weather/32.png')
+                'workers/layout.py', 'lib/Weather_Icons.lua',
+                'lib/Weather_Icon_Paths.lua')
     for rel in required:
         if not (ROOT / rel).is_file():
             print(f'[ERROR] Missing required file: {rel}')
