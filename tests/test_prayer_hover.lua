@@ -26,9 +26,9 @@ local noop = function() end
 for _, name in ipairs({'cairo_select_font_face', 'cairo_move_to',
         'cairo_destroy', 'cairo_set_line_width', 'cairo_stroke',
         'cairo_arc', 'cairo_rectangle', 'cairo_fill'}) do _G[name] = noop end
-_G.cairo_create = function() return {font = 20} end
+_G.cairo_create = function() return {font = 20, color = {1,1,1,1}} end
 _G.cairo_set_font_size = function(cr, size) cr.font = size end
-_G.cairo_set_source_rgba = noop
+_G.cairo_set_source_rgba = function(cr, r, g, b, a) cr.color = {r,g,b,a} end
 _G.cairo_text_extents = function(cr, str, extent)
     extent.x_advance = #tostring(str) * cr.font * 0.48
 end
@@ -36,7 +36,7 @@ _G.cairo_move_to = function(cr, x, y) cr.x, cr.y = x, y end
 local drawn = {}
 _G.cairo_show_text = function(cr, str)
     drawn[#drawn + 1] = {label = tostring(str), x = cr.x, y = cr.y,
-                         font = cr.font}
+                         font = cr.font, color = cr.color}
 end
 local stub_surface = {acquire = function() return {} end,
                       release = function() end}
@@ -79,6 +79,14 @@ local function expect(label)
 end
 local function absent(label)
     assert(not find_label(label), 'unexpected text: ' .. label)
+end
+local function assert_text_color(label, expected, description)
+    local item = expect(label)
+    assert(item.color, 'missing captured Cairo color for ' .. label)
+    for i = 1, 4 do
+        assert(math.abs(item.color[i] - expected[i]) < 0.00001,
+            (description or label) .. ' has unexpected color channel ' .. i)
+    end
 end
 local function draw()
     drawn = {}
@@ -190,6 +198,23 @@ for _, s in ipairs({0.65, 1, 1.2, 1.5}) do
     assert(find_label('01') and find_label('15'),
            'yesterday\'s Lastthird occurs in 1h15, not 25h15')
     no_hover()
+
+    -- Last Third must keep its normal white countdown color even inside the
+    -- final 15 minutes; ordinary prayer countdowns retain their red alert.
+    time_at(2026, 11, 27, 2, 1) -- Lastthird 02:15: fourteen minutes away.
+    draw()
+    move_to(7)
+    draw()
+    expect('Till Last 3rd')
+    assert_text_color('14', {1, 1, 1, 200/255},
+        'Last Third final-15-minute countdown')
+    no_hover()
+
+    time_at(2026, 11, 26, 17, 2) -- Maghrib 17:15: thirteen minutes away.
+    draw()
+    expect('Till Maghrib')
+    assert_text_color('13', {200/255, 55/255, 55/255, 200/255},
+        'ordinary prayer final-15-minute alert')
 
     -- Next-day rollover for normal prayers; Saturday after Isha -> Sunday Dhuhr.
     time_at(2026, 11, 28, 20, 0)

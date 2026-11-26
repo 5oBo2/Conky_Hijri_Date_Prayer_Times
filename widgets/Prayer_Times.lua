@@ -119,7 +119,8 @@ local function next_hover_event(target, now, dates)
             if ts and ts >= now and (not best or ts < best.ts) then
                 best = {
                     name = target == 'Lastthird' and 'Last 3rd' or target,
-                    ts = ts
+                    ts = ts,
+                    is_last_third = target == 'Lastthird',
                 }
             end
         end
@@ -236,7 +237,9 @@ local function countdown(cr, prefix, event, now, x, y, alert)
     local seconds = math.max(0, (prefix == 'Since ' and now - event.ts)
         or (event.ts - now))
     local hh, mm = data_source.hms(seconds)
-    local minute_color = (alert and RED or WHITE)
+    -- The Last Third countdown is informational, not an imminent prayer
+    -- alert: it never switches to red during its final 15 minutes.
+    local minute_color = (alert and not event.is_last_third and RED or WHITE)
     text(cr, prefix .. prayer_display_name(event.name, event.ts), FONT_SMALL, x - 10 * SCALE, y, WHITE)
     text(cr, hh, FONT_LARGE, x, y + FONT_LARGE, WHITE)
     text(cr, mm, FONT_LARGE, x + FONT_LARGE + 12 * SCALE, y + FONT_LARGE, minute_color)

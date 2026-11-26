@@ -11,6 +11,12 @@ local schedule = {
 }
 local today_hijri = {day='12', month={number=7}, year='1448'}
 local next_hijri = {day='13', month={number=7}, year='1448'}
+local MONTH_NAMES = {
+    'Muharram', 'Safar', 'Rabi Al Awwal', 'Rabi Al Thani',
+    'Jumada Al Oula', 'Jumada Al-Akhira', 'Rajab', 'Shaban',
+    'Ramadan', 'Shawwal', 'Dhul Qidah', 'Dhul Hijjah',
+}
+local SACRED_MONTHS = {[1]=true, [7]=true, [11]=true, [12]=true}
 local current_day
 local next_day
 Prayer_Data.get = function(date)
@@ -141,9 +147,9 @@ local function run_date(month, day, before, after, expected)
         if text.text == string.format('%02d', day) then found=text.color end
     end
     assert(found, 'hijri day was not rendered')
-    if month == 9 then
+    if month == 9 or day < 12 or day > 15 then
         assert(found[1] == 1 and found[2] == 1 and found[3] == 1,
-            'Ramadan days 12-15 must remain white')
+            'ordinary dates and Ramadan days 12-15 must remain white')
     elseif day == 12 then
         assert(math.abs(found[1] - 200/255) < .00001 and
                math.abs(found[2] - 55/255) < .00001,
@@ -158,6 +164,28 @@ local function run_date(month, day, before, after, expected)
                math.abs(found[3] - b) < .00001,
             'days 13-15 must use configured prayer accent ' .. hex)
     end
+
+    -- Sacred month names use the configured accent; all other month names
+    -- stay white. This is independent of the White Days day-number styling.
+    local month_color
+    for _, item in ipairs(captured) do
+        if item.text == MONTH_NAMES[month] then month_color = item.color end
+    end
+    assert(month_color, 'Hijri month name was not rendered')
+    if SACRED_MONTHS[month] then
+        local hex = accent_override or '#efb46f'
+        local r = tonumber(hex:sub(2, 3), 16) / 255
+        local g = tonumber(hex:sub(4, 5), 16) / 255
+        local b = tonumber(hex:sub(6, 7), 16) / 255
+        assert(math.abs(month_color[1] - r) < .00001 and
+               math.abs(month_color[2] - g) < .00001 and
+               math.abs(month_color[3] - b) < .00001,
+            MONTH_NAMES[month] .. ' must use configured sacred-month accent')
+    else
+        assert(month_color[1] == 1 and month_color[2] == 1 and
+               month_color[3] == 1,
+            MONTH_NAMES[month] .. ' must remain white')
+    end
     conky_main(); assert(#calls == expected, 'fasting reminder duplicate')
 end
 for _, day in ipairs({13,14,15}) do
@@ -165,6 +193,12 @@ for _, day in ipairs({13,14,15}) do
         timestamp(2026,11,23,17,15), 1)
     run_date(9, day, timestamp(2026,11,23,17,14)+59,
         timestamp(2026,11,23,17,15), 0)
+end
+-- Four sacred month names are accented; a non-sacred control and Ramadan
+-- remain white. Day 01 keeps the ordinary white day-number styling.
+for _, month in ipairs({1,7,11,12,2,9}) do
+    run_date(month,1,timestamp(2026,11,23,17,14)+59,
+        timestamp(2026,11,23,17,15),0)
 end
 run_date(9,12,timestamp(2026,11,23,17,14)+59,
     timestamp(2026,11,23,17,15),0)

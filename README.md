@@ -153,6 +153,10 @@ notify_fasting_days = yes
   12–15 in normal white. Outside Ramadan, day **12 alone** is red;
   **13–15** use the same configured `appearance.next_prayer_color` as the
   upcoming prayer (default `#efb46f`), without changing their reminders.
+- The four sacred Hijri month names—**Muharram (1), Rajab (7), Dhul Qidah
+  (11), and Dhul Hijjah (12)**—use that same configured accent. Other month
+  names remain white. This month-name accent is independent of White Days
+  coloring, and requires no additional setting.
 - Cold startup, widget restarts, and large sleep/wake time jumps do **not**
   backfill missed reminders. Prayer reminders are issued only on the live
   15-minute threshold crossing. Fasting reminders require the Date widget to
@@ -176,6 +180,22 @@ section 4). Existing installations should retain their own `settings.ini` and
 personal files. Save a full configuration profile before changing location,
 appearance or placement (see section 5). All four windows share the selected
 active settings file; location and cache signatures are updated on restart.
+
+## Gregorian Worldline hover
+
+Hover the Gregorian date row in either `date_only` or `date_and_weather`
+mode to replace it temporarily with the compact, two-column Worldline view.
+The large configured-accent `day-of-year / 365` (or `/ 366`) count anchors
+the left; a smaller block to its right shows `YEAR PROGRESS`, the percentage,
+a thin progress track, ISO week and days left. The two columns are centered together as one group. The left column is sized
+from the active font's rendered text width, so the progress labels cannot
+overlap the day count or clip at the right edge. The original Gregorian date returns when the pointer leaves.
+
+The reveal uses the existing Gregorian row; the clock and Hijri row keep their
+original positions, font size and typography. Cairo's font size is explicitly
+restored before measuring/drawing Hijri so the hover cannot shrink it. The
+`gregorian` hitbox is independent of the existing `weather` hover zone; both
+use `date_weather_hover_failsafe_seconds`. No new setting is required.
 
 ## Date hover forecast design
 
@@ -443,7 +463,7 @@ prayer and weather workers refresh their location-keyed caches automatically.
 
 ## 6. Data and behavior
 
-- **Prayer + Hijri:** `workers/prayer_fetch.py` uses Aladhan to populate the `CONKY_PRAYER_V2` cache consumed by `lib/Prayer_Data.lua`, including the API's `Lastthird` time (not an estimate calculated in Lua). The Hijri date rolls at Maghrib. **Left-click the seventh Prayer column** to switch its label/time between **Midnight** and **Last 3rd**. The column starts on Midnight at each launch; the post-Isha **Till Midnight** countdown never changes with this toggle. Prayer countdown and hover zones are configured with `elapsed_minutes`, `hover_failsafe_seconds`, `hover_debug_outline`, `hijri_offset_days`, and `athan_enabled`; see `docs/HOVER_ZONE.md` for the mouse-hook diagnostic. On Fedora 45 / Conky 1.24.2 XWayland the user verified that the click toggle works. Setting `update_interval = 0.25` in `configs/conky_prayer_times.conf` (manually, on the installed widget) makes the updated column appear within the next quarter-second refresh, at the cost of four redraws per second. No new setting is needed. Prayer time interpretation expects your system timezone to match the configured location.
+- **Prayer + Hijri:** `workers/prayer_fetch.py` uses Aladhan to populate the `CONKY_PRAYER_V2` cache consumed by `lib/Prayer_Data.lua`, including the API's `Lastthird` time (not an estimate calculated in Lua). The Hijri date rolls at Maghrib; the month names Muharram, Rajab, Dhul Qidah and Dhul Hijjah use the configured `appearance.next_prayer_color` accent. Other month names remain white. **Left-click the seventh Prayer column** to switch its label/time between **Midnight** and **Last 3rd**. The column starts on Midnight at each launch; the post-Isha **Till Midnight** countdown never changes with this toggle. The hovered **Till Last 3rd** countdown keeps its normal color during its final 15 minutes; ordinary prayer countdowns retain the red final-15-minute warning. Prayer countdown and hover zones are configured with `elapsed_minutes`, `hover_failsafe_seconds`, `hover_debug_outline`, `hijri_offset_days`, and `athan_enabled`; see `docs/HOVER_ZONE.md` for the mouse-hook diagnostic. On Fedora 45 / Conky 1.24.2 XWayland the user verified that the click toggle works. Setting `update_interval = 0.25` in `configs/conky_prayer_times.conf` (manually, on the installed widget) makes the updated column appear within the next quarter-second refresh, at the cost of four redraws per second. No new setting is needed. Prayer time interpretation expects your system timezone to match the configured location.
 - **Weather:** `weather_fetch.py` uses Open-Meteo without an API key for noncommercial personal use, caching current conditions, sunrise/sunset and tomorrow-through-day-three daily forecast data in `~/.cache/conky-sun-weather/`. Weather remains independent of Date; enabling `date_and_weather` adds a *second* current-weather display and its three-day hover forecast inside Date without suppressing standalone Weather. Unavailable forecast data is omitted instead of showing invented or outdated rows.
 - **Astrolabe:** draws a transparent Sun/Moon dial with lunar phase, night progress and solar schedule from shared caches. It discards weather solar timestamps from a different calendar day (including after sleep/wake), falling back to today's prayer cache or temporarily showing a waiting state until fresh data arrives. The 24-hour bar and lunar phase continue to update. **Left-click either the dial or the 24-hour bar** to toggle five `F/D/A/M/I` prayer ticks/labels on both surfaces; they persist after mouse leave until clicked again (and reset when Conky restarts). Hover alone does nothing. When prayers are shown, a **magenta arc** on the night dial track marks the last third of the Islamic night from the *cached* `Lastthird` start to **Fajr** (not sunrise). Before sunrise this uses the previous evening's `Lastthird` and today's Fajr; afterward it uses today's `Lastthird` and tomorrow's Fajr. The dial uses the relevant night's Maghrib/Isha; the 24h bar always uses today's five prayers. **Two gold bands** directly on the daylight dial track are visible even without the prayer overlay, matching the bar's existing 5%-of-24-hours (72-minute) sunrise/sunset gradient windows. These are a visual approximation, not solar-elevation-derived photographic golden hours. Prayer markers wait for required cached dates instead of inventing times. `hover_failsafe_seconds` no longer controls Astrolabe prayer visibility. It redraws at 0.25 seconds while running. The Astrolabe has no background card; icons for standalone Weather and Date weather are loaded from `assets/weather/`.
 

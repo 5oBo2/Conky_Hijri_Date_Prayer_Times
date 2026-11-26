@@ -21,6 +21,9 @@ local DAYS_ADJUSTMENT = math.floor(settings.number('behavior', 'hijri_offset_day
 local MONTHS = { 'Muharram', 'Safar', 'Rabi Al Awwal', 'Rabi Al Thani',
     'Jumada Al Oula', 'Jumada Al-Akhira', 'Rajab', 'Shaban',
     'Ramadan', 'Shawwal', 'Dhul Qidah', 'Dhul Hijjah' }
+-- The four sacred months share the configured accent; White Days still
+-- color only the day number and retain their separate Ramadan rules.
+local SACRED_MONTHS = { [1] = true, [7] = true, [11] = true, [12] = true }
 local WHITE = { 1, 1, 1, 200 / 255 }
 local BRIGHT_WHITE = { 1, 1, 1, 0.94 }
 local RED = { 200 / 255, 55 / 255, 55 / 255, 200 / 255 }
@@ -48,7 +51,8 @@ local DATE_WEATHER_ICON_DY = settings.number('appearance', 'date_weather_icon_dy
 local hover = Hover.new(settings.number('behavior', 'date_weather_hover_failsafe_seconds'))
 
 function conky_on_mouse(event)
-    if not DATE_SHOW_WEATHER then return false end
+    -- Weather and Gregorian date use independent named hover zones. The
+    -- Gregorian interaction is available in both date_only and date+weather.
     return hover:mouse(event, os.time())
 end
 
@@ -90,6 +94,96 @@ local function measure(cr, value, size)
     local ext = cairo_text_extents_t:create()
     cairo_text_extents(cr, tostring(value), ext)
     return ext
+end
+
+-- Worldline Gregorian reveal. The day count and progress instrument form one
+-- measured group, centered as a whole. Text extents determine the column split
+-- so the small labels can never overlap the large day count.
+local function draw_gregorian_worldline(cr, now, widget_width, baseline_y, max_width)
+    local date = os.date('*t', now)
+    local year = date.year
+    local day_of_year = tonumber(os.date('%j', now)) or date.yday or 1
+    local leap = year % 4 == 0 and (year % 100 ~= 0 or year % 400 == 0)
+    local year_length = leap and 366 or 365
+    local days_remaining = math.max(0, year_length - day_of_year)
+    local iso_week = tonumber(os.date('%V', now)) or 1
+    local progress = day_of_year / year_length
+
+    local day_label = string.format('%d / %d', day_of_year, year_length)
+    local title = 'YEAR PROGRESS'
+    local percentage = string.format('%.1f%%', progress * 100)
+    local week_label = string.format('WEEK %02d', iso_week)
+    local remaining_label = string.format('%d DAYS LEFT', days_remaining)
+
+    local day_size = 36 * SCALE
+    local small_size = 9 * SCALE
+    local column_gap = 18 * SCALE
+    local label_gap = 12 * SCALE
+    local day_ext = measure(cr, day_label, day_size)
+    local title_ext = measure(cr, title, small_size)
+    local percentage_ext = measure(cr, percentage, small_size)
+    local week_ext = measure(cr, week_label, small_size)
+    local remaining_ext = measure(cr, remaining_label, small_size)
+
+    -- Reserve enough width for both right-hand label rows, based on the
+    -- rendered font metrics rather than fixed percentage columns.
+    local right_min_width = math.max(
+        title_ext.x_advance + percentage_ext.x_advance + label_gap,
+        week_ext.x_advance + remaining_ext.x_advance + label_gap)
+    local required_width = day_ext.x_advance + column_gap + right_min_width
+    local available_width = math.max(1, math.min(max_width,
+        widget_width - 32 * SCALE))
+
+    -- On unusually narrow widgets, scale the typography down uniformly rather
+    -- than clipping the labels or allowing them to collide with the day count.
+    if required_width > available_width then
+        local fit = available_width / required_width
+        day_size = day_size * fit
+        small_size = small_size * fit
+        column_gap = column_gap * fit
+        label_gap = label_gap * fit
+        day_ext = measure(cr, day_label, day_size)
+        title_ext = measure(cr, title, small_size)
+        percentage_ext = measure(cr, percentage, small_size)
+        week_ext = measure(cr, week_label, small_size)
+        remaining_ext = measure(cr, remaining_label, small_size)
+        right_min_width = math.max(
+            title_ext.x_advance + percentage_ext.x_advance + label_gap,
+            week_ext.x_advance + remaining_ext.x_advance + label_gap)
+        required_width = day_ext.x_advance + column_gap + right_min_width
+    end
+
+    local group_width = math.min(available_width,
+        math.max(465 * SCALE, required_width))
+    local left_x = (widget_width - group_width) / 2
+    local right_x = left_x + day_ext.x_advance + column_gap
+    local right_width = group_width - day_ext.x_advance - column_gap
+    local right_edge = right_x + right_width
+
+    local quiet = {120 / 255, 117 / 255, 112 / 255, 1}
+    local top_y = baseline_y - 38 * SCALE
+    local bottom_y = baseline_y - 7 * SCALE
+
+    cairo_set_font_size(cr, day_size)
+    text(cr, day_label, left_x, baseline_y - 13 * SCALE, ACCENT)
+
+    cairo_set_font_size(cr, small_size)
+    text(cr, title, right_x, top_y, quiet)
+    text(cr, percentage, right_edge - percentage_ext.x_advance,
+        top_y, quiet)
+
+    local bar_y = baseline_y - 26 * SCALE
+    local bar_height = math.max(2, 3 * SCALE)
+    cairo_set_source_rgba(cr, quiet[1], quiet[2], quiet[3], 0.30)
+    cairo_rectangle(cr, right_x, bar_y, right_width, bar_height)
+    cairo_fill(cr)
+    cairo_set_source_rgba(cr, ACCENT[1], ACCENT[2], ACCENT[3], ACCENT[4])
+    cairo_rectangle(cr, right_x, bar_y, right_width * progress, bar_height)
+    cairo_fill(cr)
+
+    text(cr, week_label, right_x, bottom_y, quiet)
+    text(cr, remaining_label,
+        right_edge - remaining_ext.x_advance, bottom_y, quiet)
 end
 
 local function draw_divider(cr, x, top_y, bottom_y)
@@ -331,10 +425,33 @@ function conky_main()
             FONT_CLOCK, WHITE)
     end
 
-    cairo_set_font_size(cr, FONT_DATE)
-    text(cr, gregorian, (conky_window.width - width(cr, gregorian, ext)) / 2,
-        y_gregorian, WHITE)
+    local gregorian_ext = measure(cr, gregorian, FONT_DATE)
+    local gregorian_x = (conky_window.width - gregorian_ext.x_advance) / 2
+    local worldline_width = math.max(1,
+        conky_window.width - 32 * SCALE)
+    local zone_width = math.min(conky_window.width,
+        math.max(math.min(465 * SCALE, worldline_width),
+            gregorian_ext.x_advance + 16 * SCALE))
+    local zone_left = (conky_window.width - zone_width) / 2
+    local zone_top = math.max(0, y_gregorian - 44 * SCALE)
+    local zone_bottom = math.min(conky_window.height or math.huge,
+        y_gregorian + 8 * SCALE)
+    hover:set_zone('gregorian', {
+        zone_left, zone_top, zone_left + zone_width, zone_bottom,
+    })
 
+    if hover:visible('gregorian', now) then
+        draw_gregorian_worldline(cr, now, conky_window.width,
+            y_gregorian, worldline_width)
+    else
+        cairo_set_font_size(cr, FONT_DATE)
+        text(cr, gregorian, gregorian_x, y_gregorian, WHITE)
+    end
+
+    -- Cairo font size is drawing state, not scoped to a helper. Restore the
+    -- original date size before measuring or drawing the Hijri row so the
+    -- Gregorian reveal can never shrink the Hijri date.
+    cairo_set_font_size(cr, FONT_DATE)
     if hijri_data then
         local h = hijri_data.date.hijri
         local day = tonumber(h.day)
@@ -351,12 +468,14 @@ function conky_main()
             end
             local x = (conky_window.width - total) / 2
             for i = 1, 3 do
-                local day_color = WHITE
+                local piece_color = WHITE
                 if i == 1 and month ~= 9 then
-                    if day == 12 then day_color = RED
-                    elseif day >= 13 and day <= 15 then day_color = ACCENT end
+                    if day == 12 then piece_color = RED
+                    elseif day >= 13 and day <= 15 then piece_color = ACCENT end
+                elseif i == 2 and SACRED_MONTHS[month] then
+                    piece_color = ACCENT
                 end
-                text(cr, pieces[i], x, y_hijri, day_color)
+                text(cr, pieces[i], x, y_hijri, piece_color)
                 x = x + widths[i] + margin
             end
         end

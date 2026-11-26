@@ -301,6 +301,52 @@ obsolete backend-specific assumptions instead of supporting parallel layouts.
 
 ---
 
+### [x] Task 12: Accent the Four Sacred Hijri Months — Implemented; Live Appearance Confirmation Pending
+**Goal:** Use the configured `appearance.next_prayer_color` accent for the four sacred Hijri month names in the Date widget.
+
+- **Sacred months:** Muharram (1), Rajab (7), Dhul Qidah (11), and Dhul Hijjah (12).
+- Only the month name changes color. The day number and Hijri year retain their existing styling.
+- Preserve the existing White Days rules: outside Ramadan, day 12 alone is red and days 13–15 use the configured accent; Ramadan days 12–15 remain white.
+- No new setting. The month-name accent follows `appearance.next_prayer_color` (default `#efb46f`).
+- **Acceptance:** Lua regression coverage verifies all four sacred months, a non-sacred control, Ramadan, and a non-default configured accent. Confirm the result in the live Date widget.
+
+---
+
+### [ ] Task 13: Whisper Clock Hover — Time, Seconds and Timezone
+**Goal:** Add the approved Whisper interaction to the Date widget's clock without changing its idle footprint.
+
+- Keep the large `HH:MM` display. On hover, show smaller live `:SS` immediately to the **right** of the main time, bottom-aligned (not above or below it as a separate row).
+- Show the local timezone abbreviation and UTC offset explicitly; Cairo standard time should read `EET · UTC+02:00`, with daylight-saving time reflected when active (`EEST · UTC+03:00`).
+- Optionally show a discreet live UTC clock in the hover detail, matching the approved V4 concept.
+- Use the system's IANA timezone data / actual local timezone; do not hardcode EET year-round.
+- Reserve the same clock footprint for idle and hover states; no layout shift of the Gregorian or Hijri lines.
+- **Acceptance:** seconds tick live, timezone label and offset match the system at standard/daylight time, and pointer movement does not cause flicker or reposition the widget.
+
+---
+
+### [x] Task 14: Worldline Gregorian Date Hover — Reference-Matched; Live KDE Confirmation Pending
+**Goal:** Implement the compact two-column Worldline hover shown in the approved reference.
+
+- Preserve the current Gregorian date when idle.
+- On hover, show the large configured-accent `day-of-year / 365` (or `/ 366`) count on the left. To its right, show `YEAR PROGRESS`, the percentage, a thin proportional progress track, ISO week, and days left.
+- Center the day-count and progress columns together as one measured group. Use rendered text extents to size the day-count column and reserve enough width for all right-column labels; never allow overlap or clipping.
+- Keep the reveal inside the Gregorian row. The clock and Hijri row retain their original positions, font size and typography; explicitly restore Cairo's `FONT_DATE` before measuring/drawing Hijri. On unusually narrow widgets, scale the Worldline typography down uniformly rather than clipping.
+- Works in both `date_only` and `date_and_weather` modes. Gregorian and weather hitboxes remain independent and share the existing Date hover timeout.
+- **Verification:** Regression coverage checks 2026-11-26 (330 / 365, 90.4%, ISO week 48, 35 days left), leap-year 2024-12-31 (366 / 366, 100.0%, ISO week 01, zero days left), progress-bar ratio, centered group geometry, non-overlapping text extents, unchanged clock/Hijri baselines and Hijri font size, plus independent weather/Gregorian hitboxes. Live KDE visual confirmation remains pending.
+
+---
+
+### [ ] Task 15: Hijri Date Hover and Next Islamic Event
+**Goal:** Implement the approved Hijri hover treatment with the month number and next Islamic event.
+
+- Preserve the current Hijri date when idle.
+- On hover, reveal the Hijri month number, month name, and Hijri year, plus the next upcoming Islamic event and a countdown when reliable event data is available.
+- Prefer AlAdhan's `nextHijriHoliday` endpoint (or its documented holiday data) rather than inferring event dates from month/day names. Reuse the existing location, request/cache conventions, and avoid blocking the drawing loop.
+- Clearly handle missing, stale, or unavailable event data; never invent an event or countdown. Respect the configured Hijri date adjustment where applicable.
+- **Acceptance:** Verify month numbering, upcoming-event selection across Hijri month/year boundaries, cache expiry/failure behavior, and the hover layout without moving the other date lines.
+
+---
+
 ## Findings & Handoff Log
 > **Instructions for Agents:** Append a dated entry under each task you complete (or attempt). Never delete prior entries. Include: files modified/created, environment quirks (Conky version, Wayland/X11 mouse hook behavior, font glyph checks), design decisions, and exact test commands run.
 
@@ -467,3 +513,24 @@ obsolete backend-specific assumptions instead of supporting parallel layouts.
 - Golden-hour bands and the optional last-third arc now use the dial progress radius (`R`), not smaller inset rings. Their timing, colors, and click visibility are unchanged.
 - The upcoming prayer's displayed clock now matches its name and dot in `appearance.next_prayer_color`; all other prayer times remain white. Muting changes only the dot to widget red.
 - Regression tests assert the dial-track radius and accented clock with default/custom colors and after mute.
+
+### Task 12 — Four Sacred Hijri Month Accents (2026-11-26; offline implemented)
+- **Change:** The month names Muharram (1), Rajab (7), Dhul Qidah (11), and Dhul Hijjah (12) now use the configured `appearance.next_prayer_color` accent. All other month names remain white.
+- **Isolation:** Only the month-name piece changes. Existing day-number behavior is unchanged: day 12 red, days 13–15 configured accent outside Ramadan, and days 12–15 white during Ramadan.
+- **Files:** `widgets/Hijri_Date.lua`, `tests/test_notifications.lua`, `README.md`, and this roadmap. No new settings or API calls.
+- **Verification:** The notification/date drawing regression now checks all four sacred months, a non-sacred month, Ramadan, ordinary day-number coloring, and a custom accent. Live KDE rendering remains for user confirmation.
+- **Next:** Task 13 (Whisper Clock Hover), Task 14 (Worldline Gregorian Date Hover), and Task 15 (Hijri Hover / next Islamic event) are queued independently.
+
+### Task 14 — Worldline Gregorian Hover Reference Correction + Last Third Countdown Color Exception (2026-11-26; offline implemented)
+- **Gregorian reveal:** The hover now matches the supplied reference composition: a large configured-accent `day-of-year / year-length` count on the left; a compact block on the right with `YEAR PROGRESS`, percentage, thin progress track, ISO week and days left. The progress block is not stretched across the widget.
+- **Hijri preservation:** The Gregorian renderer's Cairo font-size state is explicitly reset to `FONT_DATE` before the Hijri row is measured or drawn. The Hijri baseline, size, typography and content remain unchanged between idle and Gregorian-hover states.
+- **Hover integration:** Gregorian hover works in both `date_only` and `date_and_weather` modes. It uses a separate `gregorian` zone alongside the existing `weather` zone; both continue to use `date_weather_hover_failsafe_seconds`. No new settings or API calls.
+- **Prayer countdown exception:** The hovered `Till Last 3rd` countdown keeps its normal color during its final 15 minutes. Ordinary prayer countdowns retain the red final-15-minute warning.
+- **Files:** `widgets/Hijri_Date.lua`, `widgets/Prayer_Times.lua` (Last Third exception from the previous patch), `tests/test_gregorian_hover.lua`, `tests/test_prayer_hover.lua`, `README.md`, and this roadmap. Sacred-month coloring and other prayer/date behavior remain unchanged.
+- **Verification:** Gregorian regression checks 330 / 365, 90.4%, ISO week 48, 35 days left, leap-year 366 / 366, the progress ratio, reference left/right alignment, unchanged clock/Hijri baselines and Hijri font size, and independent weather/Gregorian hitboxes. Live KDE rendering remains for user confirmation.
+
+### Task 14 — Worldline Alignment Refinement (2026-11-26; offline implemented)
+- **Change:** Center the complete Worldline composition using the widget's true horizontal center. The left day-count column is measured from Cairo's active font extents, and the progress column begins after that measured width plus a scaled gap.
+- **Clipping prevention:** The right column reserves enough width for both top and bottom label pairs. On unusually narrow widgets, the typography scales down uniformly rather than allowing labels to collide or run outside the progress block.
+- **Preserved:** Clock and Hijri row positions and font sizes; Gregorian data, year-progress calculation, weather hover independence, and the Last Third countdown color exception.
+- **Verification:** Regression tests assert the full group center, day-count/progress separation, containment of all four small labels, and the same geometry at 0.65x, 1x, and 1.5x scales.
