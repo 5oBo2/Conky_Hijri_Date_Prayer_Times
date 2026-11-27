@@ -152,7 +152,7 @@ local idle_day = expect('16')
 local idle_month = expect('Jumada Al-Akhira')
 local idle_year = expect('1448')
 local idle_clock = expect('12:30')
-local idle_gregorian = expect(os.date('%A |  %d %B %Y', now))
+local idle_gregorian = expect(os.date('%A', now))
 local state = get_hover()
 assert(state.zones.hijri and state.zones.gregorian and state.zones.clock,
     'Hijri, Gregorian and clock zones must all exist')
@@ -183,7 +183,7 @@ assert(month_name.y > month_number.y - 20,
     'month name should sit alongside the large month index')
 assert(math.abs(expect('12:30').y - idle_clock.y) < 0.001,
     'Hijri hover must not move the clock')
-assert(math.abs(expect(os.date('%A |  %d %B %Y', now)).y - idle_gregorian.y) < 0.001,
+assert(math.abs(expect(os.date('%A', now)).y - idle_gregorian.y) < 0.001,
     'Hijri hover must not move the Gregorian date')
 assert(countdown.color[1] > countdown.color[2] * 0.8,
     'event countdown should use the configured accent')

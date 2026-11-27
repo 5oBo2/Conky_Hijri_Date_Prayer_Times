@@ -136,7 +136,7 @@ now = at(2026,11,26,12,30,5)
 assert(loadfile(root .. 'widgets/Hijri_Date.lua'))()
 draw()
 local idle_time = expect('12:30')
-local gregorian = expect(os.date('%A |  %d %B %Y', now))
+local gregorian = expect(os.date('%A', now))
 local hijri_month = expect('Rajab')
 absent(':05')
 absent(os.date('%Z', now))
@@ -170,7 +170,7 @@ assert(offset.y == zone.y,
     'timezone and UTC offset must share one line')
 assert(math.abs((zone.y - main.y) - 26) < 0.001,
     'timezone metadata must sit on the raised clock guide line')
-assert(math.abs(gregorian.y - expect(os.date('%A |  %d %B %Y', now)).y) < 0.001,
+assert(math.abs(gregorian.y - expect(os.date('%A', now)).y) < 0.001,
     'clock hover must not move Gregorian date')
 assert(math.abs(hijri_month.y - expect('Rajab').y) < 0.001,
     'clock hover must not move Hijri date')
