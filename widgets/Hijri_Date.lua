@@ -803,7 +803,8 @@ function conky_main()
 
     local clock = os.date('%H%M', now)
     local gregorian_day = os.date('%A', now)
-    local gregorian_date = os.date('  %d %B %Y', now)
+    local gregorian_date = os.date('%d %B %Y', now)
+    local gregorian_divider_gap = 20 * SCALE
     local y_gregorian = FONT_CLOCK + FONT_DATE + (FONT_DATE / 1.5)
     local y_hijri = y_gregorian + FONT_DATE + (FONT_DATE / 3)
 
@@ -829,7 +830,8 @@ function conky_main()
 
     local gregorian_day_ext = measure(cr, gregorian_day, FONT_DATE)
     local gregorian_date_ext = measure(cr, gregorian_date, FONT_DATE)
-    local gregorian_width = gregorian_day_ext.x_advance + gregorian_date_ext.x_advance
+    local gregorian_width = gregorian_day_ext.x_advance
+        + gregorian_divider_gap * 2 + gregorian_date_ext.x_advance
     local gregorian_x = (conky_window.width - gregorian_width) / 2
     local worldline_width = math.max(1,
         conky_window.width - 32 * SCALE)
@@ -850,13 +852,12 @@ function conky_main()
     else
         cairo_set_font_size(cr, FONT_DATE)
         text(cr, gregorian_day, gregorian_x, y_gregorian, WHITE)
-        text(cr, gregorian_date, gregorian_x + gregorian_day_ext.x_advance,
+        local separator_x = gregorian_x + gregorian_day_ext.x_advance
+            + gregorian_divider_gap
+        text(cr, gregorian_date, separator_x + gregorian_divider_gap,
             y_gregorian, WHITE)
         -- Match the clock/weather divider: a slim, vertically faded line
         -- using the same configured accent color.
-        local space_ext = measure(cr, ' ', FONT_DATE)
-        local separator_x = gregorian_x + gregorian_day_ext.x_advance
-            + space_ext.x_advance
         draw_divider(cr, separator_x, y_gregorian - FONT_DATE * 0.78,
             y_gregorian + FONT_DATE * 0.18)
     end
